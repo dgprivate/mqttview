@@ -85,26 +85,67 @@ engine. It evaluates the common shapes (`{{ value }}`, `{{ value_json.a.b }}`,
 `{{ value_json.x | round(1) }}`) and, for anything else, shows the raw payload
 and marks the value with an asterisk. It will not guess.
 
-## Quick start
+## Many brokers, one instance
+
+mqttview is built around holding several brokers open at once, not switching
+between them. Each connection has its own protocol version, credentials, TLS
+material, subscriptions, topic tree and message history — a production broker on
+MQTT 5 over TLS and a workshop Raspberry Pi on 3.1.1 plaintext coexist happily,
+and neither one's traffic appears in the other's view.
+
+Connections reconnect on their own, auto-connect at startup if you ask them to,
+and survive restarts with their credentials decrypted from the data volume.
+Plugins see every connection: the Home Assistant device list can span all of
+them or filter to one.
+
+## Quick start with Docker Compose
 
 ```bash
 git clone https://github.com/mqttview/mqttview.git
 cd mqttview
+cp .env.example .env
 
-# Build the frontend into web/dist, then the binary that embeds it.
-make build
+# Generate the key that encrypts stored broker credentials, then keep it.
+sed -i "s/^MQTTVIEW_SECRET_KEY=.*/MQTTVIEW_SECRET_KEY=$(openssl rand -hex 32)/" .env
 
-./mqttview -addr 127.0.0.1:8114
+docker compose up -d
+docker compose logs mqttview        # the generated admin password is printed once
 ```
 
-On first run mqttview creates an administrator account and prints the generated
-password once. Open <http://127.0.0.1:8114>, sign in, and add a broker.
+Open <http://127.0.0.1:8114> and sign in.
 
-### Docker
+Want two brokers to try it on? The `demo` profile starts a pair of Mosquitto
+containers alongside:
+
+```bash
+docker compose --profile demo up -d
+```
+
+Then add both in the UI as `mqtt://mosquitto-a:1883` and
+`mqtt://mosquitto-b:1883` — they are on the same Compose network, so the service
+names resolve.
+
+The image is a multi-stage build: Node builds the frontend, Go embeds it into a
+static CGO-free binary, and the result runs as a non-root user on Alpine with a
+read-only root filesystem and a health check. Only `/data` is writable, and that
+is the volume holding the database and the encryption key.
+
+### Plain Docker
 
 ```bash
 docker build -t mqttview .
-docker run -p 8114:8114 -v mqttview-data:/data mqttview
+docker run -d -p 127.0.0.1:8114:8114 \
+  -e MQTTVIEW_BASE_URL=http://127.0.0.1:8114 \
+  -e MQTTVIEW_SECRET_KEY="$(openssl rand -hex 32)" \
+  -v mqttview-data:/data \
+  mqttview
+```
+
+### From source
+
+```bash
+make build            # frontend into web/dist, then the binary that embeds it
+./mqttview -addr 127.0.0.1:8114
 ```
 
 ## Configuration
@@ -136,6 +177,9 @@ plugins:
     settings:
       discoveryPrefix: homeassistant
 ```
+
+Deployment specifics — the container's shape, backups, reverse proxies and
+systemd — are in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 Secrets can stay out of the file entirely — every provider credential has an
 environment override (`MQTTVIEW_OIDC_GOOGLE_CLIENT_SECRET`, and so on). See

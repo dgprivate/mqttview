@@ -1,0 +1,23 @@
+# Keep the build context small and, more importantly, keep secrets out of it.
+.git
+.github
+
+# Runtime state: broker credentials and the encryption key must never be
+# baked into an image.
+data/
+*.db
+*.db-wal
+*.db-shm
+secret.key
+mqttview.yaml
+
+# Build output — the image builds its own.
+mqttview
+web/node_modules/
+web/dist/
+
+# Editors and docs that do not affect the build
+.idea/
+.vscode/
+*.swp
+.DS_Store

@@ -12,8 +12,10 @@
 *.db-shm
 secret.key
 
-# Local configuration
+# Local configuration and secrets
 /mqttview.yaml
+.env
+!.env.example
 
 # Editors and OS
 .DS_Store

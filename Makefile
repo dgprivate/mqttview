@@ -2,7 +2,7 @@ BINARY  ?= mqttview
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: help build build-web build-go run dev test lint fmt clean docker
+.PHONY: help build build-web build-go run dev test lint fmt clean docker compose-up compose-demo compose-down
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -33,7 +33,16 @@ fmt: ## Format the Go code
 	gofmt -w ./cmd ./internal
 
 docker: ## Build the container image
-	docker build -t $(BINARY):$(VERSION) .
+	docker build --build-arg VERSION=$(VERSION) -t $(BINARY):$(VERSION) -t $(BINARY):latest .
+
+compose-up: ## Start mqttview with Docker Compose
+	docker compose up -d --build
+
+compose-demo: ## Start mqttview plus two throwaway brokers
+	docker compose --profile demo up -d --build
+
+compose-down: ## Stop the stack (keeps the data volume)
+	docker compose --profile demo down
 
 clean: ## Remove build output
 	rm -f $(BINARY)

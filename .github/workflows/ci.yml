@@ -78,3 +78,76 @@ jobs:
 
       - name: Smoke test the binary
         run: ./mqttview -version
+
+  docker:
+    name: Container image
+    runs-on: ubuntu-latest
+    needs: [go, web]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: mqttview:ci
+          build-args: VERSION=ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # A container that builds but will not boot is worse than one that fails
+      # to build, so start it and wait for the health endpoint.
+      - name: Start the container
+        run: |
+          docker run -d --name mqttview -p 8114:8114 \
+            -e MQTTVIEW_BASE_URL=http://127.0.0.1:8114 \
+            -e MQTTVIEW_BOOTSTRAP_PASSWORD=ci-smoke-test-password \
+            mqttview:ci
+
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8114/api/health > /dev/null; then
+              echo "healthy after ${i}s"
+              curl -sS http://127.0.0.1:8114/api/health
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "container never became healthy"
+          docker logs mqttview
+          exit 1
+
+      - name: Check the embedded frontend is served
+        run: |
+          curl -fsS http://127.0.0.1:8114/ | grep -q '<div id="root">'
+
+      - name: Stop the container
+        if: always()
+        run: docker rm -f mqttview || true
+
+  compose:
+    name: Compose stack
+    runs-on: ubuntu-latest
+    needs: [go, web]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Exercises the demo profile, which is also the multi-broker smoke test.
+      - name: Start the stack
+        run: |
+          cp .env.example .env
+          sed -i "s/^MQTTVIEW_SECRET_KEY=.*/MQTTVIEW_SECRET_KEY=$(openssl rand -hex 32)/" .env
+          sed -i "s/^MQTTVIEW_BOOTSTRAP_PASSWORD=.*/MQTTVIEW_BOOTSTRAP_PASSWORD=ci-smoke-test-password/" .env
+          docker compose --profile demo up -d --build --wait --wait-timeout 180
+
+      - name: Show what is running
+        if: always()
+        run: docker compose ps
+
+      - name: Tear down
+        if: always()
+        run: docker compose --profile demo down -v

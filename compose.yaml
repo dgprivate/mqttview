@@ -1,0 +1,87 @@
+# mqttview with Docker Compose.
+#
+#   docker compose up -d                    # just mqttview
+#   docker compose --profile demo up -d     # plus two local brokers to try it on
+#
+# Copy .env.example to .env first — that is where the encryption key and the
+# public URL live.
+
+name: mqttview
+
+services:
+  mqttview:
+    build:
+      context: .
+      args:
+        VERSION: ${MQTTVIEW_VERSION:-compose}
+    image: mqttview:${MQTTVIEW_VERSION:-latest}
+    container_name: mqttview
+    restart: unless-stopped
+
+    # Bound to loopback by default: put a TLS-terminating reverse proxy in
+    # front, or change this to 8114:8114 once you have TLS and SSO configured.
+    ports:
+      - "${MQTTVIEW_BIND:-127.0.0.1}:${MQTTVIEW_PORT:-8114}:8114"
+
+    environment:
+      MQTTVIEW_ADDR: 0.0.0.0:8114
+      MQTTVIEW_DATA_DIR: /data
+      # Must be the URL a browser actually uses. OAuth redirects, the Secure
+      # cookie flag and the WebSocket origin check all derive from it.
+      MQTTVIEW_BASE_URL: ${MQTTVIEW_BASE_URL:-http://127.0.0.1:8114}
+      MQTTVIEW_LOG_LEVEL: ${MQTTVIEW_LOG_LEVEL:-info}
+      # Decrypts stored broker passwords. Generate once and keep it: losing it
+      # means re-entering every broker credential.
+      MQTTVIEW_SECRET_KEY: ${MQTTVIEW_SECRET_KEY:-}
+      # Used only on first run, when the database has no users.
+      MQTTVIEW_BOOTSTRAP_EMAIL: ${MQTTVIEW_BOOTSTRAP_EMAIL:-admin@localhost}
+      MQTTVIEW_BOOTSTRAP_PASSWORD: ${MQTTVIEW_BOOTSTRAP_PASSWORD:-}
+
+    volumes:
+      - mqttview-data:/data
+      # Optional: drop a mqttview.yaml next to this file to configure SSO.
+      # - ./mqttview.yaml:/data/mqttview.yaml:ro
+
+    # Everything the process needs is in the volume; the rest can stay locked.
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8114/api/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  # Two brokers, so the multi-connection support is something you can see
+  # rather than take on trust. Add both in the UI as:
+  #   mqtt://mosquitto-a:1883   and   mqtt://mosquitto-b:1883
+  mosquitto-a:
+    profiles: ["demo"]
+    image: eclipse-mosquitto:2
+    container_name: mqttview-mosquitto-a
+    restart: unless-stopped
+    volumes:
+      - ./deploy/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-a-data:/mosquitto/data
+    ports:
+      - "127.0.0.1:1883:1883"
+
+  mosquitto-b:
+    profiles: ["demo"]
+    image: eclipse-mosquitto:2
+    container_name: mqttview-mosquitto-b
+    restart: unless-stopped
+    volumes:
+      - ./deploy/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-b-data:/mosquitto/data
+    ports:
+      - "127.0.0.1:1884:1883"
+
+volumes:
+  mqttview-data:
+  mosquitto-a-data:
+  mosquitto-b-data:

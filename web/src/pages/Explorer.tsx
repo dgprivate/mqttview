@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, looksBinary, payloadToText } from '../api/client'
 import type { Connection, TreeNode } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
@@ -15,8 +15,10 @@ import { useConnectionStatus, useLiveMessages } from '../ws/socket'
 export function Explorer() {
   const { id = '' } = useParams<{ id: string }>()
   const { can } = useAuth()
+  const navigate = useNavigate()
 
   const [connection, setConnection] = useState<Connection | null>(null)
+  const [allConnections, setAllConnections] = useState<Connection[]>([])
   const [error, setError] = useState('')
   const [selected, setSelected] = useState('')
   const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null)
@@ -38,6 +40,12 @@ export function Explorer() {
   useEffect(() => {
     void load()
   }, [load])
+
+  // The broker list drives the switcher, so you can move between brokers
+  // without going back to the connections page.
+  useEffect(() => {
+    api.connections().then(setAllConnections).catch(() => undefined)
+  }, [])
 
   // Refresh the tree periodically rather than on every message: a busy broker
   // would otherwise re-render the tree hundreds of times a second.
@@ -76,6 +84,24 @@ export function Explorer() {
           </p>
         </div>
         <div className="button-row">
+          {allConnections.length > 1 && (
+            <select
+              aria-label="Switch broker"
+              value={id}
+              style={{ width: 'auto', minWidth: '10rem' }}
+              onChange={(e) => {
+                setSelected('')
+                navigate(`/connections/${e.target.value}`)
+              }}
+            >
+              {allConnections.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                  {(liveStatus[c.id] ?? c.status).state === 'connected' ? '' : ' (offline)'}
+                </option>
+              ))}
+            </select>
+          )}
           <StatusBadge status={status} />
           {can('operator') && (
             <button
