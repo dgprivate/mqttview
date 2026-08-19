@@ -1,0 +1,76 @@
+# mqttview configuration.
+#
+# Every value below is optional; this file documents the defaults rather than
+# requiring them. Environment variables override anything set here, so secrets
+# can stay out of the file entirely. See docs/CONFIGURATION.md.
+
+# Where to listen. Bind to 127.0.0.1 when a reverse proxy sits in front.
+addr: 127.0.0.1:8114
+
+# The public origin. Used to build OAuth redirect URIs, to decide whether
+# session cookies get the Secure flag, and to validate WebSocket origins.
+# Behind a proxy this MUST be the URL a browser uses, not the listen address.
+base_url: http://127.0.0.1:8114
+
+# SQLite database, the generated encryption key, and plugin state live here.
+data_dir: ./data
+
+# 32 bytes as hex or base64, used to encrypt broker passwords and TLS keys at
+# rest. Left empty, mqttview generates data_dir/secret.key on first run.
+# Losing or changing it means re-entering every broker password.
+# secret_key: ""
+
+# HTTPS for the mqttview UI itself. Unrelated to the TLS used to reach brokers.
+tls:
+  enabled: false
+  # cert_file: /etc/mqttview/tls.crt
+  # key_file: /etc/mqttview/tls.key
+
+auth:
+  # How long a browser session stays valid.
+  session_ttl_hours: 168
+
+  # Username and password sign-in. Set to false to require SSO.
+  allow_local: true
+
+  # Whether a verified SSO identity with no matching account may create one.
+  # With false, an admin creates the user first (password left blank) and SSO
+  # links to it by email address.
+  allow_signup: false
+
+  # Any OIDC-compliant issuer works. Google is not special-cased.
+  # The redirect URI to register with the provider is:
+  #   <base_url>/api/auth/sso/<provider-id>/callback
+  providers: {}
+  #   google:
+  #     enabled: true
+  #     display_name: Google
+  #     issuer: https://accounts.google.com
+  #     client_id: xxxxx.apps.googleusercontent.com
+  #     # Prefer MQTTVIEW_OIDC_GOOGLE_CLIENT_SECRET over putting this here.
+  #     client_secret: ""
+  #     scopes: [openid, email, profile]
+  #     allowed_domains: [example.com]
+  #     admin_emails: [you@example.com]
+  #
+  #   authentik:
+  #     enabled: true
+  #     display_name: Company SSO
+  #     issuer: https://sso.example.com/application/o/mqttview/
+  #     client_id: ""
+  #     client_secret: ""
+
+# Seeds plugin state on first run only. Once settings exist in the database the
+# UI is authoritative and this block is ignored, so a config file cannot
+# silently revert a change someone made in the UI.
+plugins:
+  home-assistant:
+    enabled: true
+    settings:
+      # The prefix devices publish their discovery config under.
+      discoveryPrefix: homeassistant
+      # QoS for the plugin's own subscriptions.
+      subscribeQos: "0"
+      # Set to false to make the plugin observe-only: no command is ever
+      # published to a device.
+      allowControl: true

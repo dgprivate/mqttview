@@ -1,0 +1,22 @@
+# Build output
+/mqttview
+/dist/
+/web/dist/*
+!/web/dist/index.html
+/web/node_modules/
+
+# Runtime data — contains broker credentials and the encryption key
+/data/
+*.db
+*.db-wal
+*.db-shm
+secret.key
+
+# Local configuration
+/mqttview.yaml
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

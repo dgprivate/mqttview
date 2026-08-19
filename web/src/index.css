@@ -1,0 +1,772 @@
+/*
+ * mqttview stylesheet.
+ *
+ * Mobile-first: the base rules target phones (<= 640px) and the media queries
+ * add what a wider screen can afford. Colours come from CSS variables so the
+ * dark theme is a variable swap rather than a second set of rules.
+ */
+
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f0f2f5;
+  --border: #d9dee5;
+  --text: #16191d;
+  --text-dim: #5b6672;
+  --accent: #1a56db;
+  --accent-text: #ffffff;
+  --ok: #067647;
+  --ok-bg: #e6f6ee;
+  --warn: #92400e;
+  --warn-bg: #fdf3e3;
+  --err: #b42318;
+  --err-bg: #fdeceb;
+  --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  --radius: 8px;
+  --tap: 44px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121417;
+    --surface: #1a1d21;
+    --surface-2: #23272c;
+    --border: #333940;
+    --text: #e8eaed;
+    --text-dim: #98a2b0;
+    --accent: #6c95f5;
+    --accent-text: #0b0d10;
+    --ok: #5fd39a;
+    --ok-bg: #123324;
+    --warn: #f0b95b;
+    --warn-bg: #3a2c12;
+    --err: #f6837a;
+    --err-bg: #3b1a18;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+}
+
+a {
+  color: var(--accent);
+}
+
+code,
+pre,
+.mono {
+  font-family: var(--mono);
+  font-size: 0.875rem;
+}
+
+/* --- layout --- */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.6rem 0.9rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.topbar .brand {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-right: auto;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 1.05rem;
+}
+
+.topbar .brand span {
+  color: var(--accent);
+}
+
+.hamburger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+/* On a phone the nav is hidden until the hamburger opens it, at which point
+   it wraps onto its own full-width row underneath the bar. */
+.nav {
+  display: none;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex-basis: 100%;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border);
+}
+
+.nav.open {
+  display: flex;
+}
+
+.nav a {
+  display: block;
+  padding: 0.7rem 0.75rem;
+  min-height: var(--tap);
+  border-radius: var(--radius);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.nav a.active {
+  background: var(--surface-2);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.nav a:active {
+  background: var(--surface-2);
+}
+
+main {
+  flex: 1;
+  padding: 0.9rem;
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+@media (min-width: 641px) {
+  .hamburger {
+    display: none;
+  }
+
+  .nav {
+    display: flex !important;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.25rem;
+    flex-basis: auto;
+    padding: 0;
+    border: none;
+  }
+
+  .nav a {
+    padding: 0.4rem 0.7rem;
+    min-height: auto;
+  }
+
+  .topbar {
+    gap: 1.25rem;
+    padding: 0.7rem 1.25rem;
+  }
+
+  main {
+    padding: 1.25rem;
+  }
+}
+
+/* --- typography --- */
+
+h1 {
+  font-size: 1.35rem;
+  margin: 0 0 0.25rem;
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  font-size: 1.05rem;
+  margin: 0 0 0.5rem;
+}
+
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.subtitle {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+/* --- surfaces --- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  margin-bottom: 0.9rem;
+}
+
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.6rem;
+}
+
+.grid {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 900px) {
+  .grid.two {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .grid.explorer {
+    grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+/* --- controls --- */
+
+button,
+.btn {
+  font: inherit;
+  min-height: var(--tap);
+  padding: 0.55rem 0.9rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  text-decoration: none;
+}
+
+button:active,
+.btn:active {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+button.danger {
+  color: var(--err);
+  border-color: var(--err);
+  background: transparent;
+}
+
+button.small {
+  min-height: 34px;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  margin-bottom: 0.25rem;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  /* 16px keeps iOS from zooming the viewport on focus. */
+  font-size: 16px;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+}
+
+textarea {
+  min-height: 6rem;
+  font-family: var(--mono);
+  font-size: 0.875rem;
+  resize: vertical;
+}
+
+.field {
+  margin-bottom: 0.75rem;
+}
+
+.field-row {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 641px) {
+  .field-row.two {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .field-row.three {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--tap);
+}
+
+.checkbox input {
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  flex: none;
+}
+
+.checkbox label {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+/* --- status --- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: var(--surface-2);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.badge.ok {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.badge.warn {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.badge.err {
+  background: var(--err-bg);
+  color: var(--err);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+.alert {
+  padding: 0.7rem 0.9rem;
+  border-radius: var(--radius);
+  margin-bottom: 0.9rem;
+  font-size: 0.9rem;
+}
+
+.alert.error {
+  background: var(--err-bg);
+  color: var(--err);
+}
+
+.alert.info {
+  background: var(--surface-2);
+  color: var(--text-dim);
+}
+
+.alert.ok {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.empty {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: var(--text-dim);
+}
+
+/* --- tables become cards on a phone --- */
+
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+th {
+  color: var(--text-dim);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+@media (max-width: 640px) {
+  table.responsive,
+  table.responsive tbody,
+  table.responsive tr,
+  table.responsive td {
+    display: block;
+    width: 100%;
+  }
+
+  table.responsive thead {
+    display: none;
+  }
+
+  table.responsive tr {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.5rem;
+    margin-bottom: 0.6rem;
+    background: var(--surface);
+  }
+
+  table.responsive td {
+    border: none;
+    padding: 0.25rem 0.25rem;
+    display: flex;
+    gap: 0.75rem;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+
+  table.responsive td::before {
+    content: attr(data-label);
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    flex: none;
+  }
+}
+
+/* --- topic tree --- */
+
+.tree {
+  max-height: 60vh;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tree-node {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.45rem 0.4rem;
+  min-height: 40px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.tree-node:hover,
+.tree-node:active {
+  background: var(--surface-2);
+}
+
+.tree-node.selected {
+  background: var(--surface-2);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.tree-node .twist {
+  width: 1.1rem;
+  flex: none;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.tree-node .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.tree-node .count {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  flex: none;
+}
+
+.tree-children {
+  margin-left: 0.85rem;
+  border-left: 1px solid var(--border);
+  padding-left: 0.15rem;
+}
+
+/* --- message stream --- */
+
+.stream {
+  max-height: 65vh;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.msg {
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 0.15rem;
+}
+
+.msg-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.msg-topic {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  color: var(--accent);
+  word-break: break-all;
+}
+
+.msg-time {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  flex: none;
+}
+
+.payload {
+  margin: 0.35rem 0 0;
+  padding: 0.5rem 0.6rem;
+  background: var(--surface-2);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 18rem;
+  overflow: auto;
+}
+
+/* --- home assistant --- */
+
+.device {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 0.9rem;
+  overflow: hidden;
+}
+
+.device-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 0.9rem;
+  background: var(--surface-2);
+  flex-wrap: wrap;
+}
+
+.device-head h3 {
+  margin: 0;
+  font-size: 1rem;
+  flex: 1;
+  min-width: 8rem;
+}
+
+.device-meta {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  width: 100%;
+}
+
+.entity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.65rem 0.9rem;
+  border-top: 1px solid var(--border);
+}
+
+.entity-name {
+  flex: 1;
+  min-width: 9rem;
+}
+
+.entity-name small {
+  display: block;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.entity-value {
+  font-family: var(--mono);
+  font-size: 0.95rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.entity-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  width: 100%;
+}
+
+@media (min-width: 641px) {
+  .entity-actions {
+    width: auto;
+  }
+}
+
+/* --- login --- */
+
+.login-wrap {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 24rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+}
+
+.login-card h1 {
+  text-align: center;
+  margin-bottom: 1.25rem;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1rem 0;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.spinner {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2s;
+  }
+
+  button:active,
+  .btn:active {
+    transform: none;
+  }
+}
