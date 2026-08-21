@@ -144,10 +144,14 @@ export function BeckhoffPlc() {
     <>
       <div className="page-head">
         <div>
-          <h1>Beckhoff PLC</h1>
+          <h1>
+            Beckhoff PLC{' '}
+            <span className={`badge ${status.readOnly ? '' : 'warn'}`}>
+              {status.readOnly ? 'read only' : 'control on'}
+            </span>
+          </h1>
           <p className="subtitle">
-            {status.points} points, {status.lights} lights under <code>{status.topicPrefix}/</code>
-            {status.readOnly ? ' — read only' : ' — control enabled'}
+            {status.points} points and {status.lights} lights under <code>{status.topicPrefix}/</code>
           </p>
         </div>
         {connections.length > 1 && (
@@ -282,6 +286,58 @@ function describe(e: { label?: string; name: string; address: number }): string 
   return e.label || e.name || `address ${e.address}`
 }
 
+/**
+ * technicalName returns the PLC's own name only when it is not already what is
+ * being displayed, so an unnamed point reads "DI-1-1" rather than "DI-1-1
+ * DI-1-1".
+ */
+function technicalName(e: { label?: string; name: string }): string | null {
+  return e.label && e.label !== e.name ? e.name : null
+}
+
+/**
+ * daliFault turns a ballast's raw error into something readable. The PLC
+ * forwards the DALI stack's own wording, which arrives truncated mid-word
+ * ("ParameterAddressIsAShortAddressAndLiesOutsideOfThe"); the original is kept
+ * on the tooltip so nothing is hidden.
+ */
+function daliFault(error?: string): string | null {
+  if (!error) return null
+  if (error.startsWith('ParameterAddressIsAShortAddress')) return 'Address not answering'
+  if (error.toLowerCase() === 'unknown') return 'No reply'
+  return error
+}
+
+/** Segmented is a compact filter switch, sized for a thumb. */
+function Segmented<T extends string>({
+  value,
+  onChange,
+  options,
+}: {
+  value: T
+  onChange: (v: T) => void
+  options: { value: T; label: string; count?: number }[]
+}) {
+  return (
+    <div className="seg" role="group">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          className={`seg-btn ${value === o.value ? 'active' : ''}`}
+          aria-pressed={value === o.value}
+          onClick={() => onChange(o.value)}
+        >
+          {o.label}
+          {o.count !== undefined && <span className="seg-count">{o.count}</span>}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** discoveryPageSize keeps the log readable; the rest is a click away. */
+const discoveryPageSize = 30
+
 function Discovery({
   log,
   onClear,
@@ -291,108 +347,178 @@ function Discovery({
   onClear: () => void
   onName?: (name: string) => void
 }) {
-  const latest = log[0]
+  const [risingOnly, setRisingOnly] = useState(false)
+  const [hideMotion, setHideMotion] = useState(false)
+  const [search, setSearch] = useState('')
+  const [limit, setLimit] = useState(discoveryPageSize)
+  // Pausing freezes a copy rather than stopping the feed: a house full of
+  // motion sensors will not hold still while you read what just happened.
+  const [frozen, setFrozen] = useState<PlcEdge[] | null>(null)
+
+  const source = frozen ?? log
+  const needle = search.trim().toLowerCase()
+  const visible = source.filter((e) => {
+    if (risingOnly && !e.to) return false
+    if (hideMotion && e.sensorType === 'motion') return false
+    if (!needle) return true
+    return [e.name, e.label, e.location, e.sensorType, String(e.address)]
+      .filter(Boolean)
+      .some((f) => String(f).toLowerCase().includes(needle))
+  })
+  const shown = visible.slice(0, limit)
+  const latest = visible[0]
 
   return (
     <>
       <div className={`plc-latest ${latest ? (latest.to ? 'on' : 'off') : ''}`}>
-        {latest ? (
-          <>
-            <span className="plc-latest-label">{describe(latest)}</span>
-            <span className="plc-latest-meta">
-              {latest.name} · address {latest.address} · {latest.kind}
-              {latest.location ? ` · ${latest.location}` : ''}
-            </span>
-            <span className="plc-latest-transition">
-              {latest.from ? 'on' : 'off'} → {latest.to ? 'on' : 'off'} · {formatTime(latest.at)}
-            </span>
-            {onName && (
-              <div className="button-row">
-                <button className="btn" onClick={() => onName(latest.name)}>
-                  Name this signal
-                </button>
-              </div>
-            )}
-          </>
-        ) : (
-          <>
-            <span className="plc-latest-label">Listening…</span>
-            <span className="plc-latest-meta">
-              Press a button or trigger a sensor. The point that moves is named here.
-            </span>
-          </>
+        <div className="plc-latest-body">
+          {latest ? (
+            <>
+              <span className="plc-latest-label">{describe(latest)}</span>
+              <span className="plc-latest-meta">
+                <span className="mono">{latest.name}</span> · address {latest.address} · {latest.kind}
+                {latest.location ? ` · ${latest.location}` : ''}
+              </span>
+              <span className="plc-latest-transition">
+                {latest.from ? 'on' : 'off'} → {latest.to ? 'on' : 'off'} · {formatTime(latest.at)} ·{' '}
+                {formatRelative(latest.at)}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="plc-latest-label">
+                <span className="plc-pulse" /> Listening…
+              </span>
+              <span className="plc-latest-meta">
+                Press a button or trigger a sensor. The point that moves is named here.
+              </span>
+            </>
+          )}
+        </div>
+        {latest && onName && (
+          <button className="btn primary" onClick={() => onName(latest.name)}>
+            Name this
+          </button>
         )}
       </div>
 
       <div className="card">
         <div className="card-head">
-          <h2>Signal log</h2>
-          <button className="btn" onClick={onClear} disabled={log.length === 0}>
-            Clear
-          </button>
+          <h2>
+            Signal log {source.length > 0 && <small>{visible.length} of {source.length}</small>}
+          </h2>
+          <div className="button-row">
+            <button className={`btn ${frozen ? 'primary' : ''}`} onClick={() => setFrozen(frozen ? null : log)}>
+              {frozen ? 'Resume' : 'Pause'}
+            </button>
+            <button className="btn" onClick={onClear} disabled={log.length === 0}>
+              Clear
+            </button>
+          </div>
         </div>
-        {log.length === 0 ? (
+
+        <div className="plc-filters">
+          <input
+            type="search"
+            placeholder="Filter by name, label or location"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <label className="checkbox">
+            <input type="checkbox" checked={risingOnly} onChange={(e) => setRisingOnly(e.target.checked)} />
+            <span>Presses only</span>
+          </label>
+          <label className="checkbox">
+            <input type="checkbox" checked={hideMotion} onChange={(e) => setHideMotion(e.target.checked)} />
+            <span>Hide motion</span>
+          </label>
+        </div>
+
+        {shown.length === 0 ? (
           <Empty>
-            Nothing has changed yet. Only real transitions are logged, so the retained values that arrive when a
-            broker connects are not listed here.
+            {source.length === 0
+              ? 'Nothing has changed yet. Only real transitions are logged, so the retained values that arrive when a broker connects are not listed here.'
+              : 'Nothing matches these filters.'}
           </Empty>
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Point</th>
-                  <th>Address</th>
-                  <th>Location</th>
-                  <th>Change</th>
-                  {onName && <th />}
-                </tr>
-              </thead>
-              <tbody>
-                {log.map((e) => (
-                  <tr key={e.seq}>
-                    <td data-label="Time" className="mono">
-                      {formatTime(e.at)}
-                    </td>
-                    <td data-label="Point">
-                      {describe(e)}
-                      <small className="mono"> {e.name}</small>
-                    </td>
-                    <td data-label="Address" className="mono">
-                      {e.address}
-                    </td>
-                    <td data-label="Location">{e.location || '—'}</td>
-                    <td data-label="Change">
-                      <span className={`badge ${e.to ? 'ok' : ''}`}>
-                        {e.from ? 'on' : 'off'} → {e.to ? 'on' : 'off'}
-                      </span>
-                    </td>
-                    {onName && (
-                      <td data-label="">
-                        <button className="btn" onClick={() => onName(e.name)}>
-                          Name
-                        </button>
-                      </td>
-                    )}
+          <>
+            <div className="table-wrap">
+              <table className="responsive">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Point</th>
+                    <th>Address</th>
+                    <th>Location</th>
+                    <th>Change</th>
+                    {onName && <th aria-label="Actions" />}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {shown.map((e) => (
+                    <tr key={e.seq}>
+                      <td data-label="Time" className="mono">
+                        {formatTime(e.at)}
+                      </td>
+                      <td data-label="Point">
+                        {describe(e)}
+                        {technicalName(e) && <small className="mono"> {technicalName(e)}</small>}
+                      </td>
+                      <td data-label="Address" className="mono">
+                        {e.address}
+                      </td>
+                      <td data-label="Location">{e.location || '—'}</td>
+                      <td data-label="Change">
+                        <span className={`badge ${e.to ? 'ok' : ''}`}>
+                          {e.from ? 'on' : 'off'} → {e.to ? 'on' : 'off'}
+                        </span>
+                      </td>
+                      {onName && (
+                        <td data-label="">
+                          <button className="btn" onClick={() => onName(e.name)}>
+                            Name
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {visible.length > shown.length && (
+              <div className="button-row">
+                <button className="btn" onClick={() => setLimit((n) => n + discoveryPageSize)}>
+                  Show {Math.min(discoveryPageSize, visible.length - shown.length)} more
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </>
   )
 }
 
+/** pointsPageSize keeps a three-hundred-row table from becoming the page. */
+const pointsPageSize = 50
+
 function PointsView({ points, onName }: { points: PlcPoint[]; onName?: (name: string) => void }) {
   const [search, setSearch] = useState('')
-  const [kind, setKind] = useState('')
+  const [kind, setKind] = useState<'' | 'input' | 'output' | 'temperature'>('')
+  const [location, setLocation] = useState('')
+  const [limit, setLimit] = useState(pointsPageSize)
+
+  const locations = Array.from(new Set(points.map((p) => p.location).filter(Boolean) as string[])).sort()
+  const counts = {
+    input: points.filter((p) => p.kind === 'input').length,
+    output: points.filter((p) => p.kind === 'output').length,
+    temperature: points.filter((p) => p.kind === 'temperature').length,
+  }
 
   const needle = search.trim().toLowerCase()
   const visible = points.filter((p) => {
     if (kind && p.kind !== kind) return false
+    if (location && p.location !== location) return false
     if (!needle) return true
     return [p.name, p.label, p.location, p.sensorType, String(p.address)]
       .filter(Boolean)
@@ -406,26 +532,42 @@ function PointsView({ points, onName }: { points: PlcPoint[]; onName?: (name: st
           Points <small>{visible.length} of {points.length}</small>
         </h2>
       </div>
-      <div className="field-row">
+
+      <div className="plc-filters">
         <input
           type="search"
           placeholder="Search name, label or location"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <select value={kind} onChange={(e) => setKind(e.target.value)}>
-          <option value="">All kinds</option>
-          <option value="input">Inputs</option>
-          <option value="output">Outputs</option>
-          <option value="temperature">Temperatures</option>
-        </select>
+        {locations.length > 0 && (
+          <select value={location} onChange={(e) => setLocation(e.target.value)}>
+            <option value="">Everywhere</option>
+            {locations.map((l) => (
+              <option key={l} value={l}>
+                {l}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
+      <Segmented
+        value={kind}
+        onChange={setKind}
+        options={[
+          { value: '', label: 'All', count: points.length },
+          { value: 'input', label: 'Inputs', count: counts.input },
+          { value: 'output', label: 'Outputs', count: counts.output },
+          { value: 'temperature', label: 'Temps', count: counts.temperature },
+        ]}
+      />
 
       {visible.length === 0 ? (
         <Empty>Nothing matches.</Empty>
       ) : (
+        <>
         <div className="table-wrap">
-          <table>
+          <table className="responsive">
             <thead>
               <tr>
                 <th>Point</th>
@@ -434,15 +576,15 @@ function PointsView({ points, onName }: { points: PlcPoint[]; onName?: (name: st
                 <th>Location</th>
                 <th>Value</th>
                 <th>Updated</th>
-                {onName && <th />}
+                {onName && <th aria-label="Actions" />}
               </tr>
             </thead>
             <tbody>
-              {visible.map((p) => (
+              {visible.slice(0, limit).map((p) => (
                 <tr key={p.topic}>
                   <td data-label="Point">
                     {describe(p)}
-                    <small className="mono"> {p.name}</small>
+                    {technicalName(p) && <small className="mono"> {technicalName(p)}</small>}
                   </td>
                   <td data-label="Kind">{p.kind}</td>
                   <td data-label="Address" className="mono">
@@ -469,10 +611,20 @@ function PointsView({ points, onName }: { points: PlcPoint[]; onName?: (name: st
             </tbody>
           </table>
         </div>
+        {visible.length > limit && (
+          <div className="button-row">
+            <button className="btn" onClick={() => setLimit((n) => n + pointsPageSize)}>
+              Show {Math.min(pointsPageSize, visible.length - limit)} more
+            </button>
+          </div>
+        )}
+        </>
       )}
     </div>
   )
 }
+
+type LightFilter = 'all' | 'on' | 'fault'
 
 function LightsView({
   state,
@@ -486,33 +638,46 @@ function LightsView({
   onSend: (target: string, command: string, address?: number, params?: string[]) => Promise<void>
 }) {
   const { lights, summary } = state
-  const [onlyErrors, setOnlyErrors] = useState(false)
-  const [busy, setBusy] = useState<number | null>(null)
-  const visible = onlyErrors ? lights.filter((l) => l.error) : lights
+  const [filter, setFilter] = useState<LightFilter>('all')
+  const [search, setSearch] = useState('')
+  const [open, setOpen] = useState<number | null>(null)
+  const [busy, setBusy] = useState(false)
 
-  // Control needs both the operator role and the plugin setting; the setting
-  // is what the house owner turned on, the role is who is allowed to use it.
+  // Control needs both the operator role and the plugin setting: the setting is
+  // what the house owner turned on, the role is who may use it.
   const control = canOperate && Boolean(commands?.allowControl)
 
+  const needle = search.trim().toLowerCase()
+  const visible = lights.filter((l) => {
+    if (filter === 'on' && l.actualLevel <= 0) return false
+    if (filter === 'fault' && !l.error) return false
+    if (!needle) return true
+    return [l.name, String(l.address)].some((f) => f.toLowerCase().includes(needle))
+  })
+
   const run = async (address: number | null, target: string, command: string, params?: string[]) => {
-    setBusy(address ?? -1)
+    setBusy(true)
     try {
       await onSend(target, command, address ?? undefined, params)
     } finally {
-      setBusy(null)
+      setBusy(false)
     }
   }
 
   return (
     <div className="card">
       <div className="card-head">
-        <h2>
-          DALI lights <small>{summary.lightsOn} on, {summary.lightsWithError} reporting an error</small>
-        </h2>
-        <label className="checkbox">
-          <input type="checkbox" checked={onlyErrors} onChange={(e) => setOnlyErrors(e.target.checked)} />
-          <span>Only errors</span>
-        </label>
+        <h2>DALI lights</h2>
+        {control && (
+          <div className="button-row">
+            <button className="btn" disabled={busy} onClick={() => run(null, 'dali', 'refresh')}>
+              Refresh ballasts
+            </button>
+            <button className="btn" disabled={busy} onClick={() => run(null, 'system', 'refresh')}>
+              Refresh PLC
+            </button>
+          </div>
+        )}
       </div>
 
       {!control && (
@@ -528,73 +693,121 @@ function LightsView({
         </Alert>
       )}
 
-      {control && (
-        <div className="button-row">
-          <button className="btn" disabled={busy !== null} onClick={() => run(null, 'dali', 'refresh')}>
-            Refresh all ballasts
-          </button>
-          <button className="btn" disabled={busy !== null} onClick={() => run(null, 'system', 'refresh')}>
-            Refresh PLC state
-          </button>
-        </div>
+      {summary.lightsWithError > 0 && (
+        <p className="subtitle">
+          {summary.lightsWithError} of {summary.lights} ballasts are not answering the PLC. That is a bus or
+          addressing matter rather than something to fix here.
+        </p>
       )}
 
+      <div className="plc-filters">
+        <input
+          type="search"
+          placeholder="Find a light"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+      <Segmented
+        value={filter}
+        onChange={setFilter}
+        options={[
+          { value: 'all', label: 'All', count: summary.lights },
+          { value: 'on', label: 'On', count: summary.lightsOn },
+          { value: 'fault', label: 'Not answering', count: summary.lightsWithError },
+        ]}
+      />
+
       {visible.length === 0 ? (
-        <Empty>No lights to show.</Empty>
+        <Empty>No lights match.</Empty>
       ) : (
-        <div className="plc-lights">
+        <ul className="plc-list">
           {visible.map((l) => {
             const percent = l.actualLevel > 0 ? Math.round((l.actualLevel / 254) * 100) : 0
+            const fault = daliFault(l.error)
+            const expanded = open === l.address
             return (
-              <div key={l.address} className={`plc-light ${l.error ? 'bad' : ''}`} title={l.error || ''}>
-                <div className="plc-light-head">
-                  <strong className="mono">{l.name || l.address}</strong>
-                  <span>{percent}%</span>
-                </div>
-                <div className="plc-bar">
-                  <span style={{ width: `${percent}%` }} />
-                </div>
-                <small>
-                  min {l.minLevel} · max {l.maxLevel}
-                  {l.error ? ` · ${l.error}` : ''}
-                </small>
+              <li key={l.address} className={fault ? 'muted' : ''}>
+                <button
+                  className={`plc-row ${expanded ? 'open' : ''}`}
+                  onClick={() => setOpen(expanded ? null : l.address)}
+                  aria-expanded={expanded}
+                >
+                  <span className={`plc-dot ${percent > 0 ? 'lit' : ''}`} />
+                  <span className="plc-row-name mono">{l.name || `LI-${l.address}`}</span>
+                  <span className="plc-bar">
+                    <span style={{ width: `${percent}%` }} />
+                  </span>
+                  <span className="plc-row-pct mono">{percent}%</span>
+                  {fault && (
+                    <span className="plc-fault" title={l.error}>
+                      {fault}
+                    </span>
+                  )}
+                </button>
 
-                {control && (
-                  <div className="plc-light-controls">
-                    <div className="button-row">
-                      <button
-                        className="btn"
-                        disabled={busy !== null}
-                        onClick={() => run(l.address, 'dali', 'on')}
-                      >
-                        On
-                      </button>
-                      <button
-                        className="btn"
-                        disabled={busy !== null}
-                        onClick={() => run(l.address, 'dali', 'off')}
-                      >
-                        Off
-                      </button>
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={254}
-                      defaultValue={l.actualLevel}
-                      disabled={busy !== null}
-                      aria-label={`Level for ${l.name || l.address}`}
-                      // Fires on release rather than on drag: every step would
-                      // otherwise be a separate command on the DALI bus.
-                      onMouseUp={(e) => run(l.address, 'dali', 'arc', [e.currentTarget.value])}
-                      onTouchEnd={(e) => run(l.address, 'dali', 'arc', [e.currentTarget.value])}
-                    />
+                {expanded && (
+                  <div className="plc-light-panel">
+                    <dl className="plc-facts">
+                      <div>
+                        <dt>Address</dt>
+                        <dd className="mono">{l.address}</dd>
+                      </div>
+                      <div>
+                        <dt>Level</dt>
+                        <dd className="mono">{l.actualLevel} of 254</dd>
+                      </div>
+                      <div>
+                        <dt>Min / max</dt>
+                        <dd className="mono">
+                          {l.minLevel} / {l.maxLevel}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Last command</dt>
+                        <dd>{l.lastCommand || '—'}</dd>
+                      </div>
+                    </dl>
+                    {control ? (
+                      <>
+                        <div className="button-row">
+                          <button className="btn" disabled={busy} onClick={() => run(l.address, 'dali', 'on')}>
+                            On
+                          </button>
+                          <button className="btn" disabled={busy} onClick={() => run(l.address, 'dali', 'off')}>
+                            Off
+                          </button>
+                          <button
+                            className="btn"
+                            disabled={busy}
+                            onClick={() => run(l.address, 'dali', 'query_actual_level')}
+                          >
+                            Query
+                          </button>
+                        </div>
+                        <label className="plc-slider">
+                          <span>Level</span>
+                          <input
+                            type="range"
+                            min={0}
+                            max={254}
+                            defaultValue={l.actualLevel}
+                            disabled={busy}
+                            aria-label={`Level for ${l.name || l.address}`}
+                            // Fires on release rather than on drag: every step
+                            // would otherwise be its own command on the bus.
+                            onMouseUp={(e) => run(l.address, 'dali', 'arc', [e.currentTarget.value])}
+                            onTouchEnd={(e) => run(l.address, 'dali', 'arc', [e.currentTarget.value])}
+                          />
+                        </label>
+                      </>
+                    ) : null}
                   </div>
                 )}
-              </div>
+              </li>
             )
           })}
-        </div>
+        </ul>
       )}
     </div>
   )
@@ -608,7 +821,9 @@ function PowerView({ state }: { state: PlcState }) {
       {watchdog && (
         <div className="card">
           <div className="card-head">
-            <h2>Controller</h2>
+            <h2>
+              Controller <small>updated {formatRelative(watchdog.updatedAt)}</small>
+            </h2>
             <span className={`badge ${watchdog.alive && watchdog.ready ? 'ok' : 'err'}`}>
               {watchdog.alive ? 'alive' : 'not alive'}
             </span>
@@ -652,7 +867,7 @@ function PowerView({ state }: { state: PlcState }) {
             {e.alarmActive && <span className="badge err">alarm</span>}
           </div>
           <div className="table-wrap">
-            <table>
+            <table className="responsive">
               <thead>
                 <tr>
                   <th>Phase</th>
@@ -698,14 +913,19 @@ function PowerView({ state }: { state: PlcState }) {
       {meters.map((m) => (
         <div className="card" key={m.name}>
           <div className="card-head">
-            <h2>{m.name}</h2>
+            <h2>{m.name.replace(/_/g, ' ')}</h2>
             <span className={`badge ${m.available ? 'ok' : 'err'}`}>{m.available ? 'online' : 'offline'}</span>
           </div>
           <dl className="plc-facts">
             {Object.entries(m.readings ?? {}).map(([k, v]) => (
               <div key={k}>
                 <dt>{k.replace(/_/g, ' ')}</dt>
-                <dd className="mono">{v}</dd>
+                <dd className="mono">
+                  {v}
+                  {/* The meter publishes bare numbers with no units, so only the
+                      one the key names unambiguously is annotated. */}
+                  {k.endsWith('_temperature') ? ' °C' : ''}
+                </dd>
               </div>
             ))}
           </dl>

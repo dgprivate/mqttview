@@ -835,57 +835,15 @@ th {
   line-height: 1.2;
 }
 
-.plc-latest-meta,
+.plc-latest-meta {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
 .plc-latest-transition {
   color: var(--text-dim);
   font-size: 0.9rem;
   font-family: var(--mono);
-}
-
-.plc-lights {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 0.6rem;
-}
-
-.plc-light {
-  padding: 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-}
-
-.plc-light.bad {
-  border-color: var(--err);
-  background: var(--err-bg);
-}
-
-.plc-light-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.35rem;
-}
-
-.plc-light small {
-  display: block;
-  margin-top: 0.35rem;
-  color: var(--text-dim);
-  font-size: 0.75rem;
-  overflow-wrap: anywhere;
-}
-
-.plc-bar {
-  height: 6px;
-  border-radius: 3px;
-  background: var(--border);
-  overflow: hidden;
-}
-
-.plc-bar span {
-  display: block;
-  height: 100%;
-  background: var(--accent);
 }
 
 .plc-facts {
@@ -990,5 +948,268 @@ th {
   .plc-dialog {
     max-width: 32rem;
     border-radius: var(--radius);
+  }
+}
+
+/* --- segmented filter --- */
+
+.seg {
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.25rem;
+  margin-bottom: 0.75rem;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.seg-btn {
+  /* Full width on a phone so each is a comfortable tap; content-sized once
+     there is room, where stretching three buttons across a desktop made them
+     read as a second row of tabs. */
+  flex: 1 0 auto;
+  min-height: var(--tap);
+  padding: 0 0.75rem;
+  border: 0;
+  border-radius: calc(var(--radius) - 2px);
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.seg-btn.active {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.seg-btn:active {
+  opacity: 0.8;
+}
+
+.seg-count {
+  margin-left: 0.4rem;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+
+@media (min-width: 641px) {
+  .seg {
+    display: inline-flex;
+    margin-right: 0.5rem;
+  }
+
+  .seg-btn {
+    flex: 0 0 auto;
+  }
+}
+
+/* --- filter row --- */
+
+.plc-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.plc-filters input[type='search'] {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.plc-filters select {
+  flex: 0 1 14rem;
+  min-width: 0;
+}
+
+/* --- light list --- */
+
+.plc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+
+.plc-list > li {
+  border-bottom: 1px solid var(--border);
+}
+
+/*
+ * Fifty-two of sixty-four ballasts do not answer on this installation. Painting
+ * those cards red made red meaningless, so a fault is a dim row and a label,
+ * and the colour is kept for things that genuinely want attention.
+ */
+.plc-list > li.muted .plc-row-name,
+.plc-list > li.muted .plc-row-pct {
+  color: var(--text-dim);
+}
+
+.plc-row {
+  display: grid;
+  /* Mobile-first: dot, name, bar, percent on one line, and the fault wrapping
+     onto a second rather than being squeezed out of sight. */
+  grid-template-columns: 10px 4.5rem 1fr 2.75rem;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0.4rem 0.25rem;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.plc-row:active,
+.plc-row.open {
+  background: var(--surface-2);
+}
+
+.plc-dot {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.plc-dot.lit {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(26, 86, 219, 0.18);
+}
+
+.plc-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plc-row-pct {
+  text-align: right;
+  font-size: 0.85rem;
+}
+
+.plc-fault {
+  grid-column: 2 / -1;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plc-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.plc-bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+/* Indented and tinted, so an open light reads as belonging to its row. */
+.plc-light-panel {
+  /* Capped: a two-column fact list stretched to 1800px puts the value so far
+     from its label that the pair stops reading as one thing. */
+  max-width: 44rem;
+  margin: 0 0 0.6rem 0.25rem;
+  padding: 0.75rem;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--surface-2);
+}
+
+.plc-light-panel .plc-facts {
+  margin-top: 0;
+}
+
+.plc-slider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.plc-slider span {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.plc-slider input[type='range'] {
+  flex: 1;
+  min-height: var(--tap);
+}
+
+@media (min-width: 641px) {
+  /* Wide enough to keep the fault on the same line, with the bar capped so a
+     row of switched-off lights is not a page of full-width grey rules. */
+  .plc-row {
+    grid-template-columns: 10px 4.5rem minmax(3rem, 14rem) 2.75rem 1fr;
+  }
+
+  .plc-fault {
+    grid-column: auto;
+  }
+}
+
+/* --- the latest signal --- */
+
+.plc-latest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  /* Sticky, because the point of this card is to be readable while the log
+     below it scrolls past. */
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.plc-latest-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.plc-pulse {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 0.5rem;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: plc-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes plc-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plc-pulse {
+    animation: none;
+    opacity: 0.6;
   }
 }
