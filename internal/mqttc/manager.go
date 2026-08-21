@@ -182,21 +182,48 @@ func (m *Manager) Publish(ctx context.Context, id string, req PublishRequest) er
 	return c.Publish(ctx, req)
 }
 
-// StartAutoConnect connects every connection flagged AutoConnect. Failures are
-// logged rather than returned: one unreachable broker must not stop startup.
+// StartAutoConnect connects every connection flagged AutoConnect, retrying in
+// the background until it succeeds or the connection is disconnected by hand.
+// Failures are logged and left on the connection's status rather than returned:
+// one unreachable broker must not stop startup.
 func (m *Manager) StartAutoConnect(ctx context.Context) {
 	for _, c := range m.List() {
 		spec := c.Spec()
 		if !spec.AutoConnect {
 			continue
 		}
-		go func(c *Conn, name string) {
-			cctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			if err := c.connect(cctx); err != nil {
-				m.log.Warn("auto-connect failed", "connection", name, "error", err)
-			}
-		}(c, spec.Name)
+		go m.superviseAutoConnect(ctx, c, spec.Name)
+	}
+}
+
+// autoConnectBackoff caps how far the retry interval grows. A broker that is
+// down at boot should be picked up within a minute of coming back.
+const autoConnectBackoff = time.Minute
+
+func (m *Manager) superviseAutoConnect(ctx context.Context, c *Conn, name string) {
+	backoff := 5 * time.Second
+	for {
+		cctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err := c.connect(cctx)
+		cancel()
+		if err == nil {
+			return
+		}
+		// A manual disconnect while we were retrying means the user no longer
+		// wants this connection up; stop rather than fighting them.
+		if !c.wantsConnection() {
+			return
+		}
+		m.log.Warn("auto-connect failed, will retry", "connection", name, "retryIn", backoff, "error", err)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		if backoff < autoConnectBackoff {
+			backoff *= 2
+		}
 	}
 }
 
@@ -217,6 +244,9 @@ type Conn struct {
 	spec   ConnectionSpec
 	client Client
 	status Status
+	// wantConnect records the user's intent, so a background retry can tell a
+	// broker that is still unreachable from one the user has disconnected.
+	wantConnect bool
 
 	tree    *Tree
 	history *History
@@ -320,6 +350,7 @@ func willChanged(a, b *Will) bool {
 
 func (c *Conn) connect(ctx context.Context) error {
 	c.mu.Lock()
+	c.wantConnect = true
 	if c.client != nil {
 		c.mu.Unlock()
 		return nil // already running; reconnects are the client's job
@@ -342,8 +373,9 @@ func (c *Conn) connect(ctx context.Context) error {
 		c.client = nil
 		c.mu.Unlock()
 		_ = client.Disconnect(context.Background())
-		c.setState(StateError, err)
-		return fmt.Errorf("connect to %s: %w", spec.URL, err)
+		explained := explainConnectError(spec, err)
+		c.setState(StateError, explained)
+		return explained
 	}
 
 	c.mu.RLock()
@@ -407,8 +439,17 @@ func (c *Conn) UnsubscribeEphemeral(ctx context.Context, filters []string) error
 	return client.Unsubscribe(ctx, drop)
 }
 
+// wantsConnection reports whether the connection should be up, i.e. connect
+// was called and no disconnect has followed.
+func (c *Conn) wantsConnection() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.wantConnect
+}
+
 func (c *Conn) disconnect(ctx context.Context) error {
 	c.mu.Lock()
+	c.wantConnect = false
 	client := c.client
 	c.client = nil
 	c.mu.Unlock()
@@ -536,7 +577,7 @@ func (c *Conn) events() Events {
 			c.setState(StateConnected, nil)
 		},
 		Down: func(err error) {
-			c.setState(StateError, err)
+			c.setState(StateError, explainConnectError(c.Spec(), err))
 		},
 		Error: func(err error) {
 			c.mu.Lock()

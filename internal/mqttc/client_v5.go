@@ -24,6 +24,32 @@ type v5Client struct {
 	subs   map[string]Subscription
 	cm     *autopaho.ConnectionManager
 	cancel context.CancelFunc
+	// connErr is the last failure autopaho reported from its retry loop.
+	// AwaitConnection only ever returns the caller's context error, so without
+	// this the real reason never leaves the library.
+	connErr error
+	// failed is closed on the first connect failure, letting Connect answer
+	// immediately instead of waiting out its timeout.
+	failed chan struct{}
+}
+
+func (c *v5Client) setConnErr(err error) {
+	c.mu.Lock()
+	c.connErr = err
+	if err != nil {
+		select {
+		case <-c.failed: // already closed
+		default:
+			close(c.failed)
+		}
+	}
+	c.mu.Unlock()
+}
+
+func (c *v5Client) lastConnErr() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.connErr
 }
 
 func newV5Client(spec ConnectionSpec, tlsCfg *tls.Config, events Events) (*v5Client, error) {
@@ -36,6 +62,7 @@ func newV5Client(spec ConnectionSpec, tlsCfg *tls.Config, events Events) (*v5Cli
 		spec:   spec,
 		events: events,
 		subs:   make(map[string]Subscription, len(spec.Subscriptions)),
+		failed: make(chan struct{}),
 	}
 	for _, s := range spec.Subscriptions {
 		c.subs[s.Filter] = s
@@ -61,6 +88,7 @@ func newV5Client(spec ConnectionSpec, tlsCfg *tls.Config, events Events) (*v5Cli
 					c.events.fail(err)
 				}
 			}()
+			c.setConnErr(nil)
 			c.events.up(connack.SessionPresent)
 		},
 		OnConnectionDown: func() bool {
@@ -68,7 +96,8 @@ func newV5Client(spec ConnectionSpec, tlsCfg *tls.Config, events Events) (*v5Cli
 			return true // keep retrying
 		},
 		OnConnectError: func(err error) {
-			c.events.fail(err)
+			c.setConnErr(err)
+			c.events.fail(explainConnectError(spec, err))
 		},
 		ClientConfig: paho.ClientConfig{
 			ClientID: spec.ClientID,
@@ -119,9 +148,31 @@ func (c *v5Client) Connect(ctx context.Context) error {
 		return err
 	}
 	c.cm, c.cancel = cm, cancel
+	failed := c.failed
 	c.mu.Unlock()
 
-	return cm.AwaitConnection(ctx)
+	awaited := make(chan error, 1)
+	go func() { awaited <- cm.AwaitConnection(ctx) }()
+
+	select {
+	case err := <-awaited:
+		if err != nil {
+			// Prefer whatever autopaho's retry loop actually hit; the context
+			// error only says we stopped waiting, not why nothing came back.
+			if last := c.lastConnErr(); last != nil {
+				return last
+			}
+			return err
+		}
+		return nil
+	case <-failed:
+		// autopaho would keep retrying a broker that rejects us, leaving the
+		// caller to wait out the whole timeout for an answer we already have.
+		if last := c.lastConnErr(); last != nil {
+			return last
+		}
+		return errors.New("mqttc: connection attempt failed")
+	}
 }
 
 func (c *v5Client) Subscribe(ctx context.Context, subs []Subscription) error {

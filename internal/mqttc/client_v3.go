@@ -41,8 +41,12 @@ func newV3Client(spec ConnectionSpec, tlsCfg *tls.Config, events Events) (*v3Cli
 	opts.SetCleanSession(spec.CleanStart)
 	opts.SetConnectTimeout(time.Duration(spec.ConnectTimeout) * time.Second)
 	opts.SetAutoReconnect(true)
-	opts.SetConnectRetry(true)
-	opts.SetConnectRetryInterval(5 * time.Second)
+	// Deliberately off: with ConnectRetry paho loops on the initial connect
+	// internally and never completes the token with an error, so the caller
+	// only ever sees its own context deadline instead of "no route to host" or
+	// "tls: certificate required". Retrying is the Conn supervisor's job, which
+	// gets to report each failure on the way.
+	opts.SetConnectRetry(false)
 	opts.SetMaxReconnectInterval(60 * time.Second)
 	// Messages are fanned out to browsers, which imposes no ordering
 	// requirement of its own; letting handlers run concurrently avoids the
@@ -79,9 +83,9 @@ func newV3Client(spec ConnectionSpec, tlsCfg *tls.Config, events Events) (*v3Cli
 	opts.SetConnectionLostHandler(func(_ paho3.Client, err error) {
 		c.events.down(err)
 	})
-	opts.SetReconnectingHandler(func(_ paho3.Client, _ *paho3.ClientOptions) {
-		c.events.fail(errors.New("reconnecting"))
-	})
+	// No ReconnectingHandler: paho gives it no error to report, so reporting a
+	// synthetic "reconnecting" here only overwrote the real reason the link
+	// dropped, which is the one thing the user needs to see.
 
 	c.client = paho3.NewClient(opts)
 	return c, nil
