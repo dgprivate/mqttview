@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
-import type { Connection, PlcEdge, PlcPoint, PlcState, PlcStatus } from '../api/types'
+import type { Connection, PlcCommands, PlcEdge, PlcMapping, PlcPoint, PlcState, PlcStatus } from '../api/types'
+import { useAuth } from '../auth/AuthContext'
 import { Alert, Empty, formatRelative, formatTime, Spinner } from '../components/common'
 import { useFrames } from '../ws/socket'
 
@@ -26,12 +27,16 @@ const maxLog = 200
  * order to write logic against it.
  */
 export function BeckhoffPlc() {
+  const { can } = useAuth()
   const [tab, setTab] = useState<Tab>('discovery')
   const [status, setStatus] = useState<PlcStatus | null>(null)
   const [state, setState] = useState<PlcState | null>(null)
+  const [commands, setCommands] = useState<PlcCommands | null>(null)
   const [connections, setConnections] = useState<Connection[]>([])
   const [connectionId, setConnectionId] = useState('')
   const [log, setLog] = useState<PlcEdge[]>([])
+  const [mappings, setMappings] = useState<PlcMapping[]>([])
+  const [naming, setNaming] = useState<{ name: string; existing?: PlcMapping } | null>(null)
   const [error, setError] = useState('')
   const [disabled, setDisabled] = useState(false)
 
@@ -41,9 +46,16 @@ export function BeckhoffPlc() {
 
   const loadState = useCallback(async () => {
     try {
-      const [s, st] = await Promise.all([api.plcStatus(), api.plcState(connectionId)])
+      const [s, st, cmds, maps] = await Promise.all([
+        api.plcStatus(),
+        api.plcState(connectionId),
+        api.plcCommands(),
+        api.plcMappings(connectionId),
+      ])
       setStatus(s)
       setState(st)
+      setCommands(cmds)
+      setMappings(maps)
       setDisabled(false)
       setError('')
     } catch (err) {
@@ -100,13 +112,42 @@ export function BeckhoffPlc() {
   }
   if (!state || !status) return error ? <Alert kind="error">{error}</Alert> : <Spinner />
 
+  const canOperate = can('operator')
+  const mappingFor = (name: string) => mappings.find((m) => m.name === name)
+  const openNaming = (name: string) => setNaming({ name, existing: mappingFor(name) })
+
+  const saveMapping = async (m: PlcMapping) => {
+    try {
+      await api.plcSetMapping({ ...m, connectionId: connectionId || undefined })
+      setNaming(null)
+      await loadState()
+      // Names already in the log were captured with the old label, so refresh
+      // them too rather than leaving a stale name on screen.
+      seen.current = 0
+      setLog([])
+      await loadEdges()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save the name')
+    }
+  }
+
+  const send = async (target: string, command: string, address?: number, params?: string[]) => {
+    setError('')
+    try {
+      await api.plcCommand({ target, command, address, params, connectionId: connectionId || undefined })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Command failed')
+    }
+  }
+
   return (
     <>
       <div className="page-head">
         <div>
           <h1>Beckhoff PLC</h1>
           <p className="subtitle">
-            {status.points} points, {status.lights} lights under <code>{status.topicPrefix}/</code> — read only
+            {status.points} points, {status.lights} lights under <code>{status.topicPrefix}/</code>
+            {status.readOnly ? ' — read only' : ' — control enabled'}
           </p>
         </div>
         {connections.length > 1 && (
@@ -136,11 +177,103 @@ export function BeckhoffPlc() {
         ))}
       </div>
 
-      {tab === 'discovery' && <Discovery log={log} onClear={() => setLog([])} />}
-      {tab === 'io' && <PointsView points={state.points} />}
-      {tab === 'lights' && <LightsView state={state} />}
+      {tab === 'discovery' && (
+        <Discovery log={log} onClear={() => setLog([])} onName={canOperate ? openNaming : undefined} />
+      )}
+      {tab === 'io' && <PointsView points={state.points} onName={canOperate ? openNaming : undefined} />}
+      {tab === 'lights' && (
+        <LightsView state={state} commands={commands} canOperate={canOperate} onSend={send} />
+      )}
       {tab === 'power' && <PowerView state={state} />}
+
+      {naming && (
+        <NameDialog
+          name={naming.name}
+          existing={naming.existing}
+          onCancel={() => setNaming(null)}
+          onSave={saveMapping}
+        />
+      )}
     </>
+  )
+}
+
+/**
+ * NameDialog gives a point a human name. The PLC's own name is the key and is
+ * shown but not editable: it is what ties the description to the point across
+ * an address renumbering.
+ */
+function NameDialog({
+  name,
+  existing,
+  onCancel,
+  onSave,
+}: {
+  name: string
+  existing?: PlcMapping
+  onCancel: () => void
+  onSave: (m: PlcMapping) => void
+}) {
+  const [label, setLabel] = useState(existing?.label ?? '')
+  const [location, setLocation] = useState(existing?.location ?? '')
+  const [type, setType] = useState(existing?.type ?? '')
+  const [notes, setNotes] = useState(existing?.notes ?? '')
+
+  return (
+    <div className="plc-dialog-backdrop" onClick={onCancel}>
+      <div className="plc-dialog" onClick={(e) => e.stopPropagation()}>
+        <h2>
+          Name <span className="mono">{name}</span>
+        </h2>
+        <p className="subtitle">
+          Your name takes precedence over whatever the PLC publishes about this point. Clear every field to remove
+          it.
+        </p>
+        <div className="field">
+          <label htmlFor="plc-label">Label</label>
+          <input
+            id="plc-label"
+            value={label}
+            autoFocus
+            placeholder="Kuhinja - stikalo pri vratih"
+            onChange={(e) => setLabel(e.target.value)}
+          />
+        </div>
+        <div className="field-row">
+          <div className="field">
+            <label htmlFor="plc-location">Location</label>
+            <input
+              id="plc-location"
+              value={location}
+              placeholder="kitchen"
+              onChange={(e) => setLocation(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="plc-type">Type</label>
+            <input id="plc-type" value={type} placeholder="button" onChange={(e) => setType(e.target.value)} />
+          </div>
+        </div>
+        <div className="field">
+          <label htmlFor="plc-notes">Notes</label>
+          <textarea
+            id="plc-notes"
+            rows={3}
+            value={notes}
+            placeholder="What should happen when this signal fires? The PLC programmer reads this."
+            onChange={(e) => setNotes(e.target.value)}
+          />
+        </div>
+        <div className="button-row">
+          <button className="btn primary" onClick={() => onSave({ name, label, location, type, notes })}>
+            Save
+          </button>
+          <button className="btn" onClick={onCancel}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -149,7 +282,15 @@ function describe(e: { label?: string; name: string; address: number }): string 
   return e.label || e.name || `address ${e.address}`
 }
 
-function Discovery({ log, onClear }: { log: PlcEdge[]; onClear: () => void }) {
+function Discovery({
+  log,
+  onClear,
+  onName,
+}: {
+  log: PlcEdge[]
+  onClear: () => void
+  onName?: (name: string) => void
+}) {
   const latest = log[0]
 
   return (
@@ -165,6 +306,13 @@ function Discovery({ log, onClear }: { log: PlcEdge[]; onClear: () => void }) {
             <span className="plc-latest-transition">
               {latest.from ? 'on' : 'off'} → {latest.to ? 'on' : 'off'} · {formatTime(latest.at)}
             </span>
+            {onName && (
+              <div className="button-row">
+                <button className="btn" onClick={() => onName(latest.name)}>
+                  Name this signal
+                </button>
+              </div>
+            )}
           </>
         ) : (
           <>
@@ -198,6 +346,7 @@ function Discovery({ log, onClear }: { log: PlcEdge[]; onClear: () => void }) {
                   <th>Address</th>
                   <th>Location</th>
                   <th>Change</th>
+                  {onName && <th />}
                 </tr>
               </thead>
               <tbody>
@@ -219,6 +368,13 @@ function Discovery({ log, onClear }: { log: PlcEdge[]; onClear: () => void }) {
                         {e.from ? 'on' : 'off'} → {e.to ? 'on' : 'off'}
                       </span>
                     </td>
+                    {onName && (
+                      <td data-label="">
+                        <button className="btn" onClick={() => onName(e.name)}>
+                          Name
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -230,7 +386,7 @@ function Discovery({ log, onClear }: { log: PlcEdge[]; onClear: () => void }) {
   )
 }
 
-function PointsView({ points }: { points: PlcPoint[] }) {
+function PointsView({ points, onName }: { points: PlcPoint[]; onName?: (name: string) => void }) {
   const [search, setSearch] = useState('')
   const [kind, setKind] = useState('')
 
@@ -278,6 +434,7 @@ function PointsView({ points }: { points: PlcPoint[] }) {
                 <th>Location</th>
                 <th>Value</th>
                 <th>Updated</th>
+                {onName && <th />}
               </tr>
             </thead>
             <tbody>
@@ -300,6 +457,13 @@ function PointsView({ points }: { points: PlcPoint[] }) {
                     )}
                   </td>
                   <td data-label="Updated">{formatRelative(p.updatedAt)}</td>
+                  {onName && (
+                    <td data-label="">
+                      <button className="btn" onClick={() => onName(p.name)}>
+                        Name
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -310,10 +474,34 @@ function PointsView({ points }: { points: PlcPoint[] }) {
   )
 }
 
-function LightsView({ state }: { state: PlcState }) {
+function LightsView({
+  state,
+  commands,
+  canOperate,
+  onSend,
+}: {
+  state: PlcState
+  commands: PlcCommands | null
+  canOperate: boolean
+  onSend: (target: string, command: string, address?: number, params?: string[]) => Promise<void>
+}) {
   const { lights, summary } = state
   const [onlyErrors, setOnlyErrors] = useState(false)
+  const [busy, setBusy] = useState<number | null>(null)
   const visible = onlyErrors ? lights.filter((l) => l.error) : lights
+
+  // Control needs both the operator role and the plugin setting; the setting
+  // is what the house owner turned on, the role is who is allowed to use it.
+  const control = canOperate && Boolean(commands?.allowControl)
+
+  const run = async (address: number | null, target: string, command: string, params?: string[]) => {
+    setBusy(address ?? -1)
+    try {
+      await onSend(target, command, address ?? undefined, params)
+    } finally {
+      setBusy(null)
+    }
+  }
 
   return (
     <div className="card">
@@ -326,6 +514,30 @@ function LightsView({ state }: { state: PlcState }) {
           <span>Only errors</span>
         </label>
       </div>
+
+      {!control && (
+        <Alert kind="info">
+          {canOperate ? (
+            <>
+              Control is switched off. Turn on <strong>Allow DALI control</strong> in the plugin&apos;s settings to
+              switch and dim these from here.
+            </>
+          ) : (
+            <>Switching lights needs the operator role.</>
+          )}
+        </Alert>
+      )}
+
+      {control && (
+        <div className="button-row">
+          <button className="btn" disabled={busy !== null} onClick={() => run(null, 'dali', 'refresh')}>
+            Refresh all ballasts
+          </button>
+          <button className="btn" disabled={busy !== null} onClick={() => run(null, 'system', 'refresh')}>
+            Refresh PLC state
+          </button>
+        </div>
+      )}
 
       {visible.length === 0 ? (
         <Empty>No lights to show.</Empty>
@@ -346,6 +558,39 @@ function LightsView({ state }: { state: PlcState }) {
                   min {l.minLevel} · max {l.maxLevel}
                   {l.error ? ` · ${l.error}` : ''}
                 </small>
+
+                {control && (
+                  <div className="plc-light-controls">
+                    <div className="button-row">
+                      <button
+                        className="btn"
+                        disabled={busy !== null}
+                        onClick={() => run(l.address, 'dali', 'on')}
+                      >
+                        On
+                      </button>
+                      <button
+                        className="btn"
+                        disabled={busy !== null}
+                        onClick={() => run(l.address, 'dali', 'off')}
+                      >
+                        Off
+                      </button>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={254}
+                      defaultValue={l.actualLevel}
+                      disabled={busy !== null}
+                      aria-label={`Level for ${l.name || l.address}`}
+                      // Fires on release rather than on drag: every step would
+                      // otherwise be a separate command on the DALI bus.
+                      onMouseUp={(e) => run(l.address, 'dali', 'arc', [e.currentTarget.value])}
+                      onTouchEnd={(e) => run(l.address, 'dali', 'arc', [e.currentTarget.value])}
+                    />
+                  </div>
+                )}
               </div>
             )
           })}

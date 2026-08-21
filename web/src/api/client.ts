@@ -5,7 +5,9 @@ import type {
   HassDevice,
   HassStatus,
   Message,
+  PlcCommands,
   PlcEdge,
+  PlcMapping,
   PlcState,
   PlcStatus,
   PluginInfo,
@@ -218,4 +220,25 @@ export const api = {
     const suffix = q.toString() ? `?${q}` : ''
     return request<{ edges: PlcEdge[]; seq: number }>(`/api/p/beckhoff-plc/edges${suffix}`)
   },
+  plcCommands: () => request<PlcCommands>('/api/p/beckhoff-plc/commands'),
+  plcCommand: (body: {
+    connectionId?: string
+    target: string
+    command: string
+    address?: number
+    params?: string[]
+  }) =>
+    request<{ topic: string; payload: string }>('/api/p/beckhoff-plc/command', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  plcMappings: (connectionId = '') =>
+    request<PlcMapping[]>(
+      `/api/p/beckhoff-plc/mappings${connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : ''}`,
+    ),
+  plcSetMapping: (body: PlcMapping & { connectionId?: string }) =>
+    request<PlcMapping>('/api/p/beckhoff-plc/mappings', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
 }

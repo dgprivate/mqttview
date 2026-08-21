@@ -127,6 +127,15 @@ func newServer(client *Client, connectionID string) *mcp.Server {
 	}, t.lights)
 
 	mcp.AddTool(s, &mcp.Tool{
+		Name: "plc_name_point",
+		Description: "Give a PLC point a human name, location and free-text note. Use it right after " +
+			"plc_wait_for_signal, so the button somebody just pressed stops being 'DI-31-5' and becomes what they " +
+			"called it. The notes field is the place to record what the signal should do, for whoever writes the " +
+			"PLC logic. This writes to mqttview only: it changes what a point is called, never the PLC or anything " +
+			"in the house. Sending every field empty removes the name.",
+	}, t.namePoint)
+
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "plc_overview",
 		Description: "Summarise the PLC: how many points, lights and shades are known, the watchdog's alarm " +
 			"mode and stream ages, three-phase electricity readings and any M-Bus meters. Start here to find " +
@@ -374,6 +383,50 @@ func toPointView(p *plc.Point) pointView {
 		v.Value = "unknown"
 	}
 	return v
+}
+
+// nameInput is the argument set for plc_name_point.
+type nameInput struct {
+	Name     string `json:"name" jsonschema:"the PLC's own name for the point, such as DI-31-5, exactly as a signal or search reported it"`
+	Label    string `json:"label,omitempty" jsonschema:"what a person calls it, e.g. 'Kuhinja - stikalo pri vratih'"`
+	Location string `json:"location,omitempty" jsonschema:"room or area, e.g. 'kitchen'"`
+	Type     string `json:"type,omitempty" jsonschema:"what kind of thing it is: button, motion, door, water_leak and so on"`
+	Notes    string `json:"notes,omitempty" jsonschema:"free text, typically what this signal should make the PLC do"`
+}
+
+type nameOutput struct {
+	Saved   plc.Mapping `json:"saved"`
+	Removed bool        `json:"removed"`
+	Note    string      `json:"note"`
+}
+
+func (t *tools) namePoint(ctx context.Context, _ *mcp.CallToolRequest, in nameInput) (*mcp.CallToolResult, nameOutput, error) {
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return nil, nameOutput{}, fmt.Errorf("name is required: it is the PLC's own name for the point, such as DI-31-5")
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	m := plc.Mapping{
+		Name:     name,
+		Label:    strings.TrimSpace(in.Label),
+		Location: strings.TrimSpace(in.Location),
+		Type:     strings.TrimSpace(in.Type),
+		Notes:    strings.TrimSpace(in.Notes),
+	}
+	saved, err := t.client.SetMapping(reqCtx, t.connectionID, m)
+	if err != nil {
+		return nil, nameOutput{}, err
+	}
+
+	removed := saved.Label == "" && saved.Location == "" && saved.Type == "" && saved.Notes == ""
+	note := fmt.Sprintf("%s is now called %q; it will show up under that name in mqttview and in future signals", name, saved.Label)
+	if removed {
+		note = fmt.Sprintf("the name for %s was removed; it falls back to whatever the PLC publishes about it", name)
+	}
+	return nil, nameOutput{Saved: saved, Removed: removed, Note: note}, nil
 }
 
 // lightsInput is the argument set for plc_lights.

@@ -392,3 +392,29 @@ export interface PlcStatus {
   seq: number
   readOnly: boolean
 }
+
+export interface PlcCommandSpec {
+  target: string
+  command: string
+  label: string
+  description: string
+  minAddress?: number
+  maxAddress?: number
+  param?: string
+  tier: 'light' | 'output'
+}
+
+export interface PlcCommands {
+  commands: PlcCommandSpec[]
+  allowControl: boolean
+  allowDigitalOutputs: boolean
+  commandTopic: string
+}
+
+export interface PlcMapping {
+  name: string
+  label?: string
+  location?: string
+  type?: string
+  notes?: string
+}

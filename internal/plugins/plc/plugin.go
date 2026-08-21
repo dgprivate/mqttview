@@ -13,12 +13,16 @@
 // switch is wired to, and the journal is what the MCP server serves so that a
 // PLC program can be written against "the button I just pressed".
 //
-// It observes only. The PLC accepts commands on its own topic, but a house is a
-// poor place to discover a bug, so nothing here publishes.
+// Control is off until an operator switches it on, and what it will send is an
+// allow-list rather than everything the PLC accepts: DALI lights, and digital
+// outputs behind a second switch of their own. The alarm, the water valve, the
+// direct-to-Home-Assistant mode and the persistent-state wipe are all commands
+// the PLC understands and this plugin will not send.
 package plc
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -27,9 +31,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/mqttview/mqttview/internal/auth"
 	"github.com/mqttview/mqttview/internal/httpx"
 	"github.com/mqttview/mqttview/internal/mqttc"
 	"github.com/mqttview/mqttview/internal/plugin"
+	"github.com/mqttview/mqttview/internal/store"
 )
 
 // ID is the plugin's registry identifier.
@@ -44,9 +50,10 @@ type Plugin struct {
 	host     plugin.Host
 	registry *Registry
 
-	mu          sync.RWMutex
-	prefix      string
-	meterPrefix string
+	mu           sync.RWMutex
+	prefix       string
+	meterPrefix  string
+	commandTopic string
 
 	dirty     bool
 	dirtyMu   sync.Mutex
@@ -60,7 +67,7 @@ func (p *Plugin) Meta() plugin.Meta {
 		ID:          ID,
 		Name:        "Beckhoff PLC",
 		Version:     "1.0.0",
-		Description: "Reads a Beckhoff PLC's MQTT feed and shows its inputs, outputs, temperatures, DALI lights, shades, power and meters by room and name. Observes only; it never publishes a command.",
+		Description: "Reads a Beckhoff PLC's MQTT feed and shows its inputs, outputs, temperatures, DALI lights, shades, power and meters by room and name. Logs digital transitions so a button can be identified by pressing it, and lets you give points your own names. Control is off by default.",
 		Author:      "mqttview",
 		Panel:       "beckhoff-plc",
 		SettingsSchema: []plugin.SettingField{
@@ -97,6 +104,27 @@ func (p *Plugin) Meta() plugin.Meta {
 				Default:     defaultJournalSize,
 				Description: "How many digital transitions to keep for the discovery view and the MCP server.",
 			},
+			{
+				Key:         "commandTopic",
+				Label:       "Command topic",
+				Type:        "string",
+				Default:     "plc/command",
+				Description: "Topic the PLC listens on for commands.",
+			},
+			{
+				Key:         "allowControl",
+				Label:       "Allow DALI control",
+				Type:        "bool",
+				Default:     false,
+				Description: "Off by default. When on, the lights panel can switch and dim DALI ballasts and ask the PLC to refresh its state.",
+			},
+			{
+				Key:         "allowDigitalOutputs",
+				Label:       "Allow driving digital outputs",
+				Type:        "bool",
+				Default:     false,
+				Description: "Separate from DALI control and far riskier: the eighty outputs include door locks, valves and appliance relays. Only turn this on if you know what each address is wired to.",
+			},
 		},
 	}
 }
@@ -115,8 +143,21 @@ func (p *Plugin) Init(_ context.Context, host plugin.Host) error {
 		p.prefix = "plc"
 	}
 	p.meterPrefix = strings.Trim(settingString(settings, "meterPrefix", "mbus2mqtt"), "/")
+	p.commandTopic = strings.Trim(settingString(settings, "commandTopic", "plc/command"), "/")
+	if p.commandTopic == "" {
+		p.commandTopic = "plc/command"
+	}
 	prefix, meterPrefix := p.prefix, p.meterPrefix
 	p.mu.Unlock()
+
+	// Restore the names a person gave to points in an earlier run.
+	if stored, err := host.Store().All(); err == nil {
+		if err := p.registry.LoadMappings(stored); err != nil {
+			host.Logger().Warn("some stored point names could not be read", "error", err)
+		}
+	} else {
+		host.Logger().Warn("could not read stored point names", "error", err)
+	}
 
 	p.flushStop = make(chan struct{})
 	// The channel is passed in rather than read from the field, so Close can
@@ -222,6 +263,169 @@ func (p *Plugin) Routes(r chi.Router) {
 	r.Get("/status", p.handleStatus)
 	r.Get("/state", p.handleState)
 	r.Get("/edges", p.handleEdges)
+	r.Get("/commands", p.handleCommands)
+	r.Post("/command", p.handleCommand)
+	r.Get("/mappings", p.handleGetMappings)
+	r.Put("/mappings", p.handlePutMapping)
+}
+
+// handleCommands lists what this plugin is willing to send, and whether the
+// operator has switched each tier on.
+func (p *Plugin) handleCommands(w http.ResponseWriter, _ *http.Request) {
+	settings := p.host.Settings()
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"commands":            commandCatalogue,
+		"allowControl":        settingBool(settings, "allowControl", false),
+		"allowDigitalOutputs": settingBool(settings, "allowDigitalOutputs", false),
+		"commandTopic":        p.topic(),
+	})
+}
+
+func (p *Plugin) topic() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.commandTopic
+}
+
+func (p *Plugin) handleCommand(w http.ResponseWriter, r *http.Request) {
+	user, ok := auth.UserFrom(r.Context())
+	if !ok || !user.Role.AtLeast(store.RoleOperator) {
+		httpx.WriteError(w, http.StatusForbidden, "sending commands requires the operator role")
+		return
+	}
+
+	var req CommandRequest
+	if err := httpx.DecodeJSON(w, r, &req); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	spec, payload, err := buildCommand(req)
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	settings := p.host.Settings()
+	if !settingBool(settings, "allowControl", false) {
+		httpx.WriteError(w, http.StatusForbidden,
+			"control is switched off in this plugin's settings")
+		return
+	}
+	// The output tier needs its own consent on top of the general one.
+	if spec.Tier == tierOutput && !settingBool(settings, "allowDigitalOutputs", false) {
+		httpx.WriteError(w, http.StatusForbidden,
+			"driving digital outputs is switched off in this plugin's settings")
+		return
+	}
+
+	connID := req.ConnectionID
+	if connID == "" {
+		conns := p.host.Connections()
+		if len(conns) != 1 {
+			httpx.WriteError(w, http.StatusBadRequest,
+				"connectionId is required when the plugin runs on more than one broker")
+			return
+		}
+		connID = conns[0].Spec().ID
+	}
+
+	topic := p.topic()
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	if err := p.host.Publish(ctx, connID, mqttc.PublishRequest{
+		Topic:   topic,
+		Payload: payload,
+		QoS:     1, // The PLC's own publisher uses QoS 1; a lost command is worse than a repeated one.
+	}); err != nil {
+		httpx.WriteError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	// Every command that reaches a house is worth a log line naming who sent it.
+	p.host.Logger().Info("plc command sent",
+		"user", user.Email, "connection", connID, "topic", topic, "payload", string(payload))
+
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"status":  "ok",
+		"topic":   topic,
+		"payload": string(payload),
+	})
+}
+
+func (p *Plugin) handleGetMappings(w http.ResponseWriter, r *http.Request) {
+	httpx.WriteJSON(w, http.StatusOK, p.registry.Mappings(r.URL.Query().Get("connectionId")))
+}
+
+// mappingRequest names one point. Clearing every field deletes the name.
+type mappingRequest struct {
+	ConnectionID string `json:"connectionId"`
+	Name         string `json:"name"`
+	Label        string `json:"label"`
+	Location     string `json:"location"`
+	Type         string `json:"type"`
+	Notes        string `json:"notes"`
+}
+
+func (p *Plugin) handlePutMapping(w http.ResponseWriter, r *http.Request) {
+	user, ok := auth.UserFrom(r.Context())
+	if !ok || !user.Role.AtLeast(store.RoleOperator) {
+		httpx.WriteError(w, http.StatusForbidden, "naming points requires the operator role")
+		return
+	}
+
+	var req mappingRequest
+	if err := httpx.DecodeJSON(w, r, &req); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		httpx.WriteError(w, http.StatusBadRequest, "name is required: it is the PLC's own name for the point, such as DI-31-5")
+		return
+	}
+
+	connID := req.ConnectionID
+	if connID == "" {
+		conns := p.host.Connections()
+		if len(conns) != 1 {
+			httpx.WriteError(w, http.StatusBadRequest,
+				"connectionId is required when the plugin runs on more than one broker")
+			return
+		}
+		connID = conns[0].Spec().ID
+	}
+
+	m := Mapping{
+		Name:     req.Name,
+		Label:    strings.TrimSpace(req.Label),
+		Location: strings.TrimSpace(req.Location),
+		Type:     strings.TrimSpace(req.Type),
+		Notes:    strings.TrimSpace(req.Notes),
+	}
+	p.registry.SetMapping(connID, req.Name, m)
+
+	key := mappingKey(connID, req.Name)
+	var err error
+	if m.empty() {
+		err = p.host.Store().Delete(key)
+	} else {
+		var body []byte
+		if body, err = json.Marshal(m); err == nil {
+			err = p.host.Store().Set(key, string(body))
+		}
+	}
+	if err != nil {
+		// The in-memory name is already applied, so say plainly that it will
+		// not survive a restart rather than pretending the write worked.
+		p.host.Logger().Warn("saving a point name failed", "point", req.Name, "error", err)
+		httpx.WriteError(w, http.StatusInternalServerError, "the name was applied but could not be saved: "+err.Error())
+		return
+	}
+
+	p.markDirty()
+	httpx.WriteJSON(w, http.StatusOK, m)
 }
 
 // maxEdgeWait bounds a long poll. It sits below the usual sixty second proxy
@@ -312,8 +516,8 @@ func (p *Plugin) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		"lights":      lights,
 		"edges":       journal.Len(),
 		"seq":         journal.Latest(),
-		// Stated rather than configurable: control is deliberately not built.
-		"readOnly": true,
+		// Control is off unless an operator switched it on in the settings.
+		"readOnly": !settingBool(p.host.Settings(), "allowControl", false),
 	})
 }
 
@@ -331,6 +535,18 @@ func settingString(settings map[string]any, key, def string) string {
 			return s
 		case float64:
 			return strconv.FormatFloat(s, 'f', -1, 64)
+		}
+	}
+	return def
+}
+
+func settingBool(settings map[string]any, key string, def bool) bool {
+	switch v := settings[key].(type) {
+	case bool:
+		return v
+	case string:
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
 		}
 	}
 	return def

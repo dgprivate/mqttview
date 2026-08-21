@@ -927,3 +927,68 @@ th {
     font-size: 1.9rem;
   }
 }
+
+.plc-light-controls {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.plc-light-controls .button-row {
+  margin: 0 0 0.5rem;
+}
+
+.plc-light-controls .btn {
+  flex: 1;
+}
+
+.plc-light-controls input[type='range'] {
+  width: 100%;
+  min-height: var(--tap);
+}
+
+.plc-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+/* Bottom sheet on a phone, centred card once there is room for one. */
+.plc-dialog {
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 1.25rem 1rem calc(1.25rem + env(safe-area-inset-bottom));
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--surface);
+}
+
+.plc-dialog h2 {
+  margin: 0 0 0.25rem;
+}
+
+.plc-dialog .subtitle {
+  margin-bottom: 1rem;
+}
+
+.plc-dialog textarea {
+  width: 100%;
+  font: inherit;
+}
+
+@media (min-width: 641px) {
+  .plc-dialog-backdrop {
+    align-items: center;
+    padding: 1rem;
+  }
+
+  .plc-dialog {
+    max-width: 32rem;
+    border-radius: var(--radius);
+  }
+}

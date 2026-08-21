@@ -183,6 +183,74 @@ func (c *Client) State(ctx context.Context, connectionID string) (plc.State, err
 	return s, err
 }
 
+// csrfToken returns the double-submit token mqttview set at login. Writes need
+// it echoed in a header; reads do not.
+func (c *Client) csrfToken() string {
+	u, err := url.Parse(c.base)
+	if err != nil {
+		return ""
+	}
+	for _, ck := range c.http.Jar.Cookies(u) {
+		if ck.Name == "mqttview_csrf" {
+			return ck.Value
+		}
+	}
+	return ""
+}
+
+// SetMapping names a point. This writes to mqttview's own store, not to the
+// PLC: it changes what a signal is called here, and nothing in the house.
+func (c *Client) SetMapping(ctx context.Context, connectionID string, m plc.Mapping) (plc.Mapping, error) {
+	c.mu.Lock()
+	if !c.loggedIn {
+		if err := c.loginLocked(ctx); err != nil {
+			c.mu.Unlock()
+			return plc.Mapping{}, err
+		}
+	}
+	c.mu.Unlock()
+
+	payload := struct {
+		ConnectionID string `json:"connectionId,omitempty"`
+		plc.Mapping
+	}{ConnectionID: connectionID, Mapping: m}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return plc.Mapping{}, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.base+pluginPath+"/mappings", bytes.NewReader(body))
+	if err != nil {
+		return plc.Mapping{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", c.csrfToken())
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return plc.Mapping{}, fmt.Errorf("cannot reach mqttview at %s: %w", c.base, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var e struct {
+			Error string `json:"error"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&e)
+		if e.Error != "" {
+			return plc.Mapping{}, fmt.Errorf("naming failed: %s", e.Error)
+		}
+		return plc.Mapping{}, fmt.Errorf("naming failed: %s", resp.Status)
+	}
+
+	var out plc.Mapping
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return plc.Mapping{}, err
+	}
+	return out, nil
+}
+
 // Edges reads the signal journal, blocking up to wait for something new.
 func (c *Client) Edges(ctx context.Context, connectionID string, since uint64, limit int, rising bool, kind string, wait time.Duration) (EdgePage, error) {
 	q := url.Values{}

@@ -24,6 +24,7 @@ type connState struct {
 	actuators map[string]*Actuator // keyed by group/slug
 	meters    map[string]*Meter    // keyed by meter name
 	meta      map[string]sensorMeta
+	mappings  map[string]Mapping // human names, keyed by PLC point name
 	elec      map[string]*Electricity // keyed by metering point name
 	watchdog  *Watchdog
 	bridge    *Bridge
@@ -47,6 +48,7 @@ func (r *Registry) state(connID string) *connState {
 			actuators: map[string]*Actuator{},
 			meters:    map[string]*Meter{},
 			meta:      map[string]sensorMeta{},
+			mappings:  map[string]Mapping{},
 			elec:      map[string]*Electricity{},
 		}
 		r.conns[connID] = c
@@ -181,9 +183,7 @@ func (r *Registry) applyPoint(c *connState, connID string, kind Kind, rt route, 
 			To:           *p.Bool,
 			At:           p.UpdatedAt,
 		}
-		if m, ok := c.meta[p.Name]; ok {
-			e.Label, e.Location, e.SensorType, e.AlarmZone = m.Name, m.Location, m.Type, m.AlarmZone
-		}
+		e.Label, e.Location, e.SensorType, e.AlarmZone, _ = describePoint(c, p.Name)
 		r.journal.Append(e)
 	}
 	return true
@@ -548,12 +548,12 @@ func (r *Registry) Snapshot(connID string) State {
 		}
 		for _, p := range c.points {
 			cp := *p
-			if m, ok := c.meta[cp.Name]; ok {
-				cp.Label = m.Name
-				cp.Location = m.Location
-				cp.SensorType = m.Type
-				cp.AlarmZone = m.AlarmZone
-				cp.State = m.State
+			label, location, sensorType, alarmZone, known := describePoint(c, cp.Name)
+			if known {
+				cp.Label, cp.Location, cp.SensorType, cp.AlarmZone = label, location, sensorType, alarmZone
+				if m, ok := c.meta[cp.Name]; ok {
+					cp.State = m.State
+				}
 				out.Summary.Described++
 			}
 			switch cp.Kind {

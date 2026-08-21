@@ -263,3 +263,172 @@ func TestParseRoute(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildCommandAcceptsTheCatalogue(t *testing.T) {
+	tests := []struct {
+		name string
+		req  CommandRequest
+		want string
+		tier commandTier
+	}{
+		{
+			name: "dali on",
+			req:  CommandRequest{Target: "dali", Command: "on", Address: 53},
+			want: `{"target":"dali","command":"on","address":53}`,
+			tier: tierLight,
+		},
+		{
+			name: "dali arc level",
+			req:  CommandRequest{Target: "dali", Command: "arc", Address: 5, Params: []string{"128"}},
+			want: `{"target":"dali","command":"arc","address":5,"params":["128"]}`,
+			tier: tierLight,
+		},
+		{
+			name: "dali refresh takes no address",
+			req:  CommandRequest{Target: "dali", Command: "refresh"},
+			want: `{"target":"dali","command":"refresh"}`,
+			tier: tierLight,
+		},
+		{
+			name: "digital set normalises the value",
+			req:  CommandRequest{Target: "digital", Command: "set", Address: 12, Params: []string{"ON"}},
+			want: `{"target":"digital","command":"set","address":12,"params":["true"]}`,
+			tier: tierOutput,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec, payload, err := buildCommand(tt.req)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if string(payload) != tt.want {
+				t.Errorf("payload:\n got %s\nwant %s", payload, tt.want)
+			}
+			if spec.Tier != tt.tier {
+				t.Errorf("tier %q, want %q", spec.Tier, tt.tier)
+			}
+		})
+	}
+}
+
+// The PLC understands a far larger vocabulary than the plugin sends. These are
+// the ones that must never become reachable through it.
+func TestBuildCommandRefusesEverythingOutsideTheCatalogue(t *testing.T) {
+	forbidden := []CommandRequest{
+		{Target: "system", Command: "wipe_persistent_magic"},
+		{Target: "safety", Command: "reset_water_valve"},
+		{Target: "safety", Command: "set_valve_closed", Params: []string{"true"}},
+		{Target: "alarm", Command: "panic"},
+		{Target: "alarm", Command: "set_mode", Params: []string{"armed"}},
+		{Target: "mode", Command: "set_direct_ha", Params: []string{"true"}},
+		{Target: "mode", Command: "set_backup_enabled", Params: []string{"false"}},
+		{Target: "config", Command: "set_short_press_restore_last", Params: []string{"true"}},
+		{Target: "shade", Command: "tilt_pulse_raw", Address: 1},
+		{Target: "dali", Command: "dim", Address: 1},
+	}
+
+	for _, req := range forbidden {
+		if _, _, err := buildCommand(req); err == nil {
+			t.Errorf("%s/%s was accepted and must not be", req.Target, req.Command)
+		}
+	}
+}
+
+func TestBuildCommandValidatesAddressesAndParams(t *testing.T) {
+	bad := []struct {
+		name string
+		req  CommandRequest
+	}{
+		{"dali address zero", CommandRequest{Target: "dali", Command: "on", Address: 0}},
+		{"dali address past the bus", CommandRequest{Target: "dali", Command: "on", Address: 65}},
+		{"digital address past the rack", CommandRequest{Target: "digital", Command: "set", Address: 81, Params: []string{"true"}}},
+		{"arc level too high", CommandRequest{Target: "dali", Command: "arc", Address: 1, Params: []string{"255"}}},
+		{"arc level negative", CommandRequest{Target: "dali", Command: "arc", Address: 1, Params: []string{"-1"}}},
+		{"arc level not a number", CommandRequest{Target: "dali", Command: "arc", Address: 1, Params: []string{"bright"}}},
+		{"arc without a level", CommandRequest{Target: "dali", Command: "arc", Address: 1}},
+		{"digital set with a nonsense value", CommandRequest{Target: "digital", Command: "set", Address: 1, Params: []string{"maybe"}}},
+		{"refresh with an address", CommandRequest{Target: "system", Command: "refresh", Address: 3}},
+		{"on with a stray parameter", CommandRequest{Target: "dali", Command: "on", Address: 1, Params: []string{"x"}}},
+	}
+
+	for _, tt := range bad {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, _, err := buildCommand(tt.req); err == nil {
+				t.Error("expected a validation error")
+			}
+		})
+	}
+}
+
+func TestMappingOverridesPlcMetadata(t *testing.T) {
+	r := NewRegistry(0)
+	apply(t, r, "plc/sensor/DI-31-5",
+		`{"state":"OFF","type":"motion","location":"hallway","name":"Spodnji hodnik","alarm_zone":true}`)
+	apply(t, r, "plc/digital/input/245", `{"address":245,"name":"DI-31-5","value":false}`)
+
+	r.SetMapping(conn, "DI-31-5", Mapping{Label: "Hodnik - senzor pri stopnicah", Notes: "naj prizge LI-5"})
+
+	p := r.Snapshot(conn).Points[0]
+	if p.Label != "Hodnik - senzor pri stopnicah" {
+		t.Errorf("the person's name should win, got %q", p.Label)
+	}
+	// Fields the person left empty keep whatever the PLC published.
+	if p.Location != "hallway" || p.SensorType != "motion" || !p.AlarmZone {
+		t.Errorf("PLC metadata should fill the gaps: %+v", p)
+	}
+}
+
+func TestMappingNamesAPointThePlcNeverDescribed(t *testing.T) {
+	r := NewRegistry(0)
+	apply(t, r, "plc/digital/input/99", `{"address":99,"name":"DI-9-9","value":false}`)
+	if got := r.Snapshot(conn).Summary.Described; got != 0 {
+		t.Fatalf("point should start undescribed, described=%d", got)
+	}
+
+	r.SetMapping(conn, "DI-9-9", Mapping{Label: "Kuhinja - stikalo pri vratih", Location: "kitchen"})
+	st := r.Snapshot(conn)
+	if st.Summary.Described != 1 || st.Points[0].Label != "Kuhinja - stikalo pri vratih" {
+		t.Errorf("naming did not take: %+v", st.Points[0])
+	}
+
+	// Clearing every field removes the name again.
+	r.SetMapping(conn, "DI-9-9", Mapping{})
+	if got := r.Snapshot(conn).Summary.Described; got != 0 {
+		t.Errorf("cleared mapping should delete, described=%d", got)
+	}
+}
+
+func TestMappingReachesTheSignalLog(t *testing.T) {
+	r := NewRegistry(0)
+	r.SetMapping(conn, "DI-9-9", Mapping{Label: "Kuhinja - stikalo", Location: "kitchen"})
+	apply(t, r, "plc/digital/input/99", `{"address":99,"name":"DI-9-9","value":false}`)
+	apply(t, r, "plc/digital/input/99", `{"address":99,"name":"DI-9-9","value":true}`)
+
+	edges, _ := r.Journal().Since(0, 10, nil)
+	if len(edges) != 1 || edges[0].Label != "Kuhinja - stikalo" || edges[0].Location != "kitchen" {
+		t.Fatalf("the log should carry the name: %+v", edges)
+	}
+}
+
+func TestMappingsSurviveAReload(t *testing.T) {
+	r := NewRegistry(0)
+	r.SetMapping(conn, "DI-9-9", Mapping{Label: "Kuhinja", Notes: "prizge LI-5"})
+
+	// What the plugin would have written to its key-value store.
+	stored := map[string]string{
+		mappingKey(conn, "DI-9-9"): `{"name":"DI-9-9","label":"Kuhinja","notes":"prizge LI-5"}`,
+		"unrelated:key":            `{}`,
+		mappingKey(conn, "DI-1-1"): `not json`,
+	}
+
+	fresh := NewRegistry(0)
+	if err := fresh.LoadMappings(stored); err == nil {
+		t.Error("a corrupt entry should be reported")
+	}
+	got := fresh.Mappings(conn)
+	if len(got) != 1 || got[0].Name != "DI-9-9" || got[0].Notes != "prizge LI-5" {
+		t.Fatalf("reload lost the mapping: %+v", got)
+	}
+}

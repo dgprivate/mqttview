@@ -106,8 +106,27 @@ moved and what it is called. Only real transitions are recorded — the retained
 values that arrive when a broker connects are skipped, so the log means
 something the moment it appears.
 
-It observes only. The PLC accepts commands on its own topic, but a house is a
-poor place to discover a bug, so nothing in the plugin publishes.
+**Naming.** The PLC describes only the points somebody configured; the rest are
+addresses. Name one yourself from the discovery log or the I/O table and it
+takes precedence, with a free-text note for what the signal ought to do. Names
+are stored in mqttview, not pushed to the PLC, and survive a restart. Press a
+button, name it, and the wiring list writes itself.
+
+**Control** is off until you switch it on, and what it will send is an
+allow-list rather than everything the PLC accepts:
+
+| Tier | Commands | Setting |
+| --- | --- | --- |
+| Lights | DALI on, off, level, query, refresh; PLC state refresh | Allow DALI control |
+| Outputs | digital set, addresses 1–80 | Allow driving digital outputs |
+
+The second tier is deliberately separate and deliberately awkward: among the
+eighty outputs are a door lock, a water valve and a cooktop relay. Everything
+else the PLC understands — arming the alarm, tripping a panic, driving the
+valve, flipping the direct-to-Home-Assistant mode, wiping persistent state — is
+absent from the catalogue and refused. An allow-list means a command added to
+the PLC tomorrow cannot quietly become reachable from a browser. Sending also
+needs the operator role, and every command is logged with the user who sent it.
 
 ### Programming a PLC with an agent
 
@@ -124,16 +143,19 @@ MQTTVIEW_PASSWORD=... \
 ```
 
 Register it as a stdio MCP server. The tools are `plc_wait_for_signal`, which
-blocks until something moves and names it, plus `plc_recent_signals`,
-`plc_find_points`, `plc_lights` and `plc_overview`.
+blocks until something moves and names it, `plc_name_point`, which records what
+you call it, plus `plc_recent_signals`, `plc_find_points`, `plc_lights` and
+`plc_overview`.
 
 The workflow it is built for: ask the agent to wait, press the button, and it is
 told the address, PLC name, human label and location of the point you just
-touched. What comes out is a specification that names a real point — "when
-DI-31-5 rises, do this" — rather than one that guesses at an address.
+touched — then tell it what that one is called and what it should do. What comes
+out is a specification that names a real point — "when DI-31-5 rises, do this" —
+rather than one that guesses at an address.
 
-The MCP server is read-only, because the plugin it reads from is. It logs in
-with an ordinary mqttview account and issues nothing but GETs.
+The MCP server cannot actuate anything. Naming writes to mqttview's own store;
+everything else is a read. Commands stay behind the panel, where the setting and
+the role are.
 
 ## Many brokers, one instance
 
