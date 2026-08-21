@@ -55,7 +55,9 @@ the same broker as either a topic tree or a set of devices.
 
 - A small, documented Go interface: observe messages, keep state, expose HTTP
   routes, push events to the browser, publish back to the broker
-- Bundled: **Home Assistant MQTT discovery** — see below
+- Bundled: **Home Assistant MQTT discovery** and **Beckhoff PLC** — see below
+- An MCP server (`cmd/mqttview-mcp`) puts the PLC's live signals in front of an
+  AI agent, so PLC logic can be written against the button you just pressed
 - See [docs/PLUGINS.md](docs/PLUGINS.md) to write your own
 
 ## The Home Assistant plugin
@@ -84,6 +86,54 @@ as it learns about it, so enabling it does not turn mqttview into a firehose.
 engine. It evaluates the common shapes (`{{ value }}`, `{{ value_json.a.b }}`,
 `{{ value_json.x | round(1) }}`) and, for anything else, shows the raw payload
 and marks the value with an asterisk. It will not guess.
+
+## The Beckhoff PLC plugin
+
+Not every installation announces itself. A PLC typically publishes one topic per
+numeric address — `plc/digital/input/245` — and keeps the meaning of that address
+somewhere else entirely. This plugin folds the two back together: it reads the
+metadata stream keyed by the point's PLC name (`DI-31-5`) and joins it onto the
+values, so the topic tree becomes a list of named points in named rooms.
+
+It understands digital inputs and outputs, temperature channels, DALI ballasts
+with their levels and error codes, shades, door locks and valves, three-phase
+electricity with imbalance and alarms, M-Bus meters, and the controller's own
+watchdog and stream ages.
+
+**Discovery view.** The panel keeps a journal of digital transitions and shows
+the most recent one in large type. Press a wall switch, read back which address
+moved and what it is called. Only real transitions are recorded — the retained
+values that arrive when a broker connects are skipped, so the log means
+something the moment it appears.
+
+It observes only. The PLC accepts commands on its own topic, but a house is a
+poor place to discover a bug, so nothing in the plugin publishes.
+
+### Programming a PLC with an agent
+
+`cmd/mqttview-mcp` serves that same journal over the Model Context Protocol, so
+an AI agent can watch the house while you walk around it:
+
+```bash
+go build -o mqttview-mcp ./cmd/mqttview-mcp
+
+MQTTVIEW_URL=http://127.0.0.1:8114 \
+MQTTVIEW_EMAIL=you@example.com \
+MQTTVIEW_PASSWORD=... \
+./mqttview-mcp
+```
+
+Register it as a stdio MCP server. The tools are `plc_wait_for_signal`, which
+blocks until something moves and names it, plus `plc_recent_signals`,
+`plc_find_points`, `plc_lights` and `plc_overview`.
+
+The workflow it is built for: ask the agent to wait, press the button, and it is
+told the address, PLC name, human label and location of the point you just
+touched. What comes out is a specification that names a real point — "when
+DI-31-5 rises, do this" — rather than one that guesses at an address.
+
+The MCP server is read-only, because the plugin it reads from is. It logs in
+with an ordinary mqttview account and issues nothing but GETs.
 
 ## Many brokers, one instance
 

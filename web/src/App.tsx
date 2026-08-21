@@ -5,6 +5,7 @@ import type { PluginInfo } from './api/types'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { Spinner } from './components/common'
 import { Account } from './pages/Account'
+import { BeckhoffPlc } from './pages/BeckhoffPlc'
 import { ConnectionForm } from './pages/ConnectionForm'
 import { Connections } from './pages/Connections'
 import { Explorer } from './pages/Explorer'
@@ -42,6 +43,7 @@ function Shell() {
           <Route path="/connections/:id/edit" element={<ConnectionForm />} />
           <Route path="/plugins" element={<Plugins />} />
           <Route path="/home-assistant" element={<HomeAssistant />} />
+          <Route path="/beckhoff-plc" element={<BeckhoffPlc />} />
           <Route path="/users" element={<Users />} />
           <Route path="/account" element={<Account />} />
           <Route path="*" element={<Navigate to="/connections" replace />} />
@@ -65,6 +67,7 @@ function Navigation() {
   useEffect(() => setOpen(false), [location.pathname])
 
   const hassEnabled = plugins.some((p) => p.meta.id === 'home-assistant' && p.enabled)
+  const plcEnabled = plugins.some((p) => p.meta.id === 'beckhoff-plc' && p.enabled)
 
   return (
     // The nav lives inside the bar and wraps onto its own full-width row when
@@ -84,6 +87,7 @@ function Navigation() {
       <nav className={`nav ${open ? 'open' : ''}`}>
         <NavLink to="/connections">Connections</NavLink>
         {hassEnabled && <NavLink to="/home-assistant">Devices</NavLink>}
+        {plcEnabled && <NavLink to="/beckhoff-plc">PLC</NavLink>}
         <NavLink to="/plugins">Plugins</NavLink>
         {can('admin') && <NavLink to="/users">Users</NavLink>}
         <NavLink to="/account">{user?.name || user?.email}</NavLink>

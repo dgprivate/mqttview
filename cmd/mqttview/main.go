@@ -28,6 +28,7 @@ import (
 	// Bundled plugins register themselves on import. Adding a plugin to a
 	// build is one import line.
 	_ "github.com/mqttview/mqttview/internal/plugins/hass"
+	_ "github.com/mqttview/mqttview/internal/plugins/plc"
 )
 
 // version is overridden at build time with -ldflags "-X main.version=...".

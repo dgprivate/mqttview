@@ -255,3 +255,140 @@ export interface HassStatus {
   entities: number
   allowControl: boolean
 }
+
+// --- beckhoff plc plugin ---
+
+export type PlcKind = 'input' | 'output' | 'temperature'
+
+export interface PlcPoint {
+  connectionId: string
+  topic: string
+  kind: PlcKind
+  address: number
+  name: string
+  device?: string
+  bool?: boolean
+  number?: number
+  updatedAt: string
+  label?: string
+  location?: string
+  sensorType?: string
+  alarmZone?: boolean
+  state?: string
+}
+
+export interface PlcLight {
+  connectionId: string
+  topic: string
+  address: number
+  name: string
+  status: number
+  actualLevel: number
+  minLevel: number
+  maxLevel: number
+  fadeTime: number
+  fadeRate: number
+  lastCommand?: string
+  error?: string
+  updatedAt: string
+}
+
+export interface PlcShade {
+  topic: string
+  slug: string
+  position: number
+  lastCommand?: string
+  updatedAt: string
+}
+
+export interface PlcActuator {
+  topic: string
+  group: string
+  slug: string
+  state?: string
+  updatedAt: string
+}
+
+export interface PlcElectricity {
+  name: string
+  phases: { voltage: number; current: number }[]
+  frequency: number
+  voltageImbalance: number
+  currentImbalance: number
+  alarmActive: boolean
+  activeAlarms?: string[]
+  updatedAt: string
+}
+
+export interface PlcMeter {
+  name: string
+  available: boolean
+  readings?: Record<string, number>
+  updatedAt: string
+}
+
+export interface PlcWatchdog {
+  uptimeS: number
+  alive: boolean
+  mqttConnected: boolean
+  backupMqttConnected: boolean
+  fallbackActive: boolean
+  alarmMode: string
+  alarmTriggered: boolean
+  ready: boolean
+  persistentValid: boolean
+  streams?: Record<string, { count: number; ageS: number }>
+  updatedAt: string
+}
+
+export interface PlcSummary {
+  inputs: number
+  outputs: number
+  temperatures: number
+  lights: number
+  lightsWithError: number
+  lightsOn: number
+  shades: number
+  actuators: number
+  meters: number
+  described: number
+  activeInputs: number
+}
+
+export interface PlcState {
+  points: PlcPoint[]
+  lights: PlcLight[]
+  shades: PlcShade[]
+  actuators: PlcActuator[]
+  electricity: PlcElectricity[]
+  meters: PlcMeter[]
+  watchdog?: PlcWatchdog
+  bridge?: { source?: string; version?: string; uptimeHours: number; rssMb: number; freeMemMb: number }
+  summary: PlcSummary
+}
+
+export interface PlcEdge {
+  seq: number
+  connectionId: string
+  topic: string
+  kind: PlcKind
+  address: number
+  name: string
+  label?: string
+  location?: string
+  sensorType?: string
+  alarmZone?: boolean
+  from: boolean
+  to: boolean
+  at: string
+}
+
+export interface PlcStatus {
+  topicPrefix: string
+  meterPrefix: string
+  points: number
+  lights: number
+  edges: number
+  seq: number
+  readOnly: boolean
+}

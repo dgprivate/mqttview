@@ -5,6 +5,9 @@ import type {
   HassDevice,
   HassStatus,
   Message,
+  PlcEdge,
+  PlcState,
+  PlcStatus,
   PluginInfo,
   Role,
   TopicValue,
@@ -195,4 +198,24 @@ export const api = {
       `/api/p/home-assistant/devices/${encodeURIComponent(deviceKey)}/pin`,
       { method: 'POST', body: JSON.stringify({ connectionId, pinned }) },
     ),
+
+  // --- beckhoff plc plugin ---
+  plcStatus: () => request<PlcStatus>('/api/p/beckhoff-plc/status'),
+  plcState: (connectionId = '') =>
+    request<PlcState>(
+      `/api/p/beckhoff-plc/state${connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : ''}`,
+    ),
+  /**
+   * plcEdges reads the digital signal journal. Passing `since` returns only
+   * what is newer, so the discovery view can append rather than reload.
+   */
+  plcEdges: (opts: { connectionId?: string; since?: number; limit?: number; rising?: boolean } = {}) => {
+    const q = new URLSearchParams()
+    if (opts.connectionId) q.set('connectionId', opts.connectionId)
+    if (opts.since) q.set('since', String(opts.since))
+    if (opts.limit) q.set('limit', String(opts.limit))
+    if (opts.rising) q.set('rising', 'true')
+    const suffix = q.toString() ? `?${q}` : ''
+    return request<{ edges: PlcEdge[]; seq: number }>(`/api/p/beckhoff-plc/edges${suffix}`)
+  },
 }
