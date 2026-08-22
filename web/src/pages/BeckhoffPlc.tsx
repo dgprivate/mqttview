@@ -860,7 +860,9 @@ function PowerView({ state }: { state: PlcState }) {
         </div>
       )}
 
-      {electricity.map((e) => (
+      {electricity.map((e) => {
+        const meanCurrent = e.phases.reduce((sum, p) => sum + p.current, 0) / e.phases.length
+        return (
         <div className="card" key={e.name}>
           <div className="card-head">
             <h2>Electricity — {e.name}</h2>
@@ -901,14 +903,22 @@ function PowerView({ state }: { state: PlcState }) {
             </div>
             <div>
               <dt>Current imbalance</dt>
-              <dd className={`mono ${e.currentImbalance > 50 ? 'warn' : ''}`}>{e.currentImbalance.toFixed(1)} %</dd>
+              {/* Not coloured by a threshold of our own: the PLC computes this
+                  figure and raises its own alarm from it, and inventing a
+                  second opinion here would only disagree with the controller. */}
+              <dd className="mono">{e.currentImbalance.toFixed(1)} %</dd>
             </div>
           </dl>
+          <p className="subtitle">
+            Imbalance is relative, so at the {meanCurrent.toFixed(1)} A these phases are drawing, one extra lamp
+            on one phase reads as a large percentage. The controller raises its own alarm when it matters.
+          </p>
           {e.activeAlarms && e.activeAlarms.length > 0 && (
             <Alert kind="error">{e.activeAlarms.join(', ')}</Alert>
           )}
         </div>
-      ))}
+        )
+      })}
 
       {meters.map((m) => (
         <div className="card" key={m.name}>
@@ -916,19 +926,26 @@ function PowerView({ state }: { state: PlcState }) {
             <h2>{m.name.replace(/_/g, ' ')}</h2>
             <span className={`badge ${m.available ? 'ok' : 'err'}`}>{m.available ? 'online' : 'offline'}</span>
           </div>
-          <dl className="plc-facts">
-            {Object.entries(m.readings ?? {}).map(([k, v]) => (
-              <div key={k}>
-                <dt>{k.replace(/_/g, ' ')}</dt>
-                <dd className="mono">
-                  {v}
-                  {/* Units come from the plugin, so the panel, the API and the
-                      MCP server all report the same thing. */}
-                  {m.units?.[k] ? ` ${m.units[k]}` : ''}
-                </dd>
-              </div>
-            ))}
-          </dl>
+          {Object.keys(m.readings ?? {}).length === 0 ? (
+            <Empty>
+              No readings yet. This meter does not publish its state as a retained message, so nothing is known
+              about it until it next reports.
+            </Empty>
+          ) : (
+            <dl className="plc-facts">
+              {Object.entries(m.readings ?? {}).map(([k, v]) => (
+                <div key={k}>
+                  <dt>{k.replace(/_/g, ' ')}</dt>
+                  <dd className="mono">
+                    {v}
+                    {/* Units come from the plugin, so the panel, the API and the
+                        MCP server all report the same thing. */}
+                    {m.units?.[k] ? ` ${m.units[k]}` : ''}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
         </div>
       ))}
 

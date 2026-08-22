@@ -5,12 +5,13 @@ import "strings"
 // Electrical units. The PLC's electricity payload has a fixed shape, so these
 // are properties of the fields themselves rather than a lookup.
 const (
-	UnitVolt       = "V"
-	UnitAmpere     = "A"
-	UnitHertz      = "Hz"
-	UnitPercent    = "%"
-	UnitCelsius    = "°C"
-	UnitCubicMetre = "m³"
+	UnitKilowattHour = "kWh"
+	UnitVolt         = "V"
+	UnitAmpere       = "A"
+	UnitHertz        = "Hz"
+	UnitPercent      = "%"
+	UnitCelsius      = "°C"
+	UnitCubicMetre   = "m³"
 )
 
 // meterUnits maps an M-Bus reading key to its unit.
@@ -23,6 +24,9 @@ const (
 var meterUnits = map[string]string{
 	"water_volume_total": UnitCubicMetre,
 	"supply_temperature": UnitCelsius,
+	// The meter reports heat in kWh. It reads zero because this installation
+	// does not meter heat, not because the unit is unknown.
+	"heat_total": UnitKilowattHour,
 }
 
 // unitFor returns the unit for a meter reading, or an empty string when the
