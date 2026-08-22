@@ -1,5 +1,6 @@
 # Build output
 /mqttview
+/mqttview-mcp
 /dist/
 /web/dist/*
 !/web/dist/index.html
