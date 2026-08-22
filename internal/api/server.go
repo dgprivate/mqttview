@@ -102,6 +102,14 @@ func (s *Server) Handler() http.Handler {
 				r.Get("/me", s.handleMe)
 				r.Post("/logout", s.handleLogout)
 				r.Post("/password", s.handleChangePassword)
+
+				// Two-factor, all scoped to the signed-in account. An admin
+				// resetting somebody else's goes through /users instead.
+				r.Get("/2fa", s.handleTwoFactorStatus)
+				r.Post("/2fa/enrol", s.handleTwoFactorEnrol)
+				r.Post("/2fa/confirm", s.handleTwoFactorConfirm)
+				r.Post("/2fa/disable", s.handleTwoFactorDisable)
+				r.Post("/2fa/recovery-codes", s.handleRegenerateRecoveryCodes)
 			})
 		})
 

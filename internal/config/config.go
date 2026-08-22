@@ -45,6 +45,13 @@ type TLSConfig struct {
 type AuthConfig struct {
 	// SessionTTLHours is how long a login session stays valid.
 	SessionTTLHours int `yaml:"session_ttl_hours"`
+	// RequireTwoFactor makes every local account enrol a second factor before
+	// it can do anything. SSO accounts are exempt: they authenticate at the
+	// identity provider, which is where their second factor belongs.
+	RequireTwoFactor bool `yaml:"require_two_factor"`
+	// TwoFactorIssuer is the name an authenticator app shows beside the
+	// account. Defaults to "mqttview".
+	TwoFactorIssuer string `yaml:"two_factor_issuer"`
 	// TrustProxyHeaders makes mqttview believe X-Forwarded-For when working
 	// out who a request came from. Off by default, and it must stay off
 	// unless a proxy in front strips and rewrites that header: the value keys
@@ -145,6 +152,12 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("MQTTVIEW_BASE_URL"); v != "" {
 		cfg.BaseURL = v
+	}
+	if v := os.Getenv("MQTTVIEW_REQUIRE_TWO_FACTOR"); v != "" {
+		cfg.Auth.RequireTwoFactor = v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")
+	}
+	if v := os.Getenv("MQTTVIEW_TWO_FACTOR_ISSUER"); v != "" {
+		cfg.Auth.TwoFactorIssuer = v
 	}
 	if v := os.Getenv("MQTTVIEW_TRUST_PROXY_HEADERS"); v != "" {
 		cfg.Auth.TrustProxyHeaders = v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")

@@ -45,7 +45,8 @@ func (s *Store) SessionUser(hashedID string) (Session, User, error) {
 	row := s.db.QueryRow(
 		`SELECT s.id, s.user_id, s.created_at, s.expires_at, s.user_agent, s.ip,
                 u.id, u.email, u.name, u.password_hash, u.role, u.provider,
-                u.provider_subject, u.disabled, u.created_at, u.last_login_at
+                u.provider_subject, u.disabled, u.created_at, u.last_login_at,
+                u.totp_secret_enc, u.totp_confirmed_at
            FROM sessions s
            JOIN users u ON u.id = s.user_id
           WHERE s.id = ?`, hashedID)
@@ -61,10 +62,11 @@ func (s *Store) SessionUser(hashedID string) (Session, User, error) {
 		uCreated   string
 		lastLogin  sql.NullString
 		providerID string
+		totpAt     sql.NullString
 	)
 	err := row.Scan(&sess.ID, &sess.UserID, &createdAt, &expiresAt, &sess.UserAgent, &sess.IP,
 		&u.ID, &u.Email, &u.Name, &u.PasswordHash, &role, &providerID,
-		&u.ProviderSubject, &disabled, &uCreated, &lastLogin)
+		&u.ProviderSubject, &disabled, &uCreated, &lastLogin, &u.TOTPSecretEnc, &totpAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, User{}, ErrNotFound
 	}
@@ -87,6 +89,10 @@ func (s *Store) SessionUser(hashedID string) (Session, User, error) {
 	if lastLogin.Valid {
 		t := parseTime(lastLogin.String)
 		u.LastLoginAt = &t
+	}
+	if totpAt.Valid {
+		t := parseTime(totpAt.String)
+		u.TOTPConfirmedAt = &t
 	}
 	if u.Disabled {
 		return Session{}, User{}, ErrNotFound

@@ -12,6 +12,7 @@ import type {
   PlcStatus,
   PluginInfo,
   Role,
+  TwoFactorStatus,
   TopicValue,
   TreeNode,
   User,
@@ -20,11 +21,17 @@ import type {
 /** ApiError carries the server's message so the UI can show it verbatim. */
 export class ApiError extends Error {
   readonly status: number
+  /**
+   * True when the server refused because it wants a second factor, not because
+   * the credentials were wrong. The login form needs to tell those apart.
+   */
+  readonly twoFactorRequired: boolean
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, twoFactorRequired = false) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.twoFactorRequired = twoFactorRequired
   }
 }
 
@@ -65,7 +72,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       body && typeof body === 'object' && 'error' in body
         ? String((body as { error: unknown }).error)
         : `Request failed with status ${response.status}`
-    throw new ApiError(response.status, message)
+    const twoFactor =
+      body !== null && typeof body === 'object' && (body as { twoFactorRequired?: boolean }).twoFactorRequired === true
+    throw new ApiError(response.status, message, twoFactor)
   }
   return body as T
 }
@@ -109,8 +118,26 @@ export function looksBinary(base64: string | null | undefined): boolean {
 export const api = {
   // --- auth ---
   authConfig: () => request<AuthConfig>('/api/auth/config'),
-  login: (email: string, password: string) =>
-    request<User>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  /** login sends the code only when the server has asked for one. */
+  login: (email: string, password: string, code = '') =>
+    request<User>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password, code }) }),
+
+  // --- two-factor ---
+  twoFactorStatus: () => request<TwoFactorStatus>('/api/auth/2fa'),
+  twoFactorEnrol: () => request<{ secret: string; uri: string }>('/api/auth/2fa/enrol', { method: 'POST' }),
+  twoFactorConfirm: (code: string) =>
+    request<{ recoveryCodes: string[] }>('/api/auth/2fa/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+  twoFactorDisable: (password: string, code: string) =>
+    request<void>('/api/auth/2fa/disable', { method: 'POST', body: JSON.stringify({ password, code }) }),
+  regenerateRecoveryCodes: (code: string) =>
+    request<{ recoveryCodes: string[] }>('/api/auth/2fa/recovery-codes', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+  clearUserTwoFactor: (id: string) => request<void>(`/api/users/${id}/2fa`, { method: 'DELETE' }),
   logout: () => request<void>('/api/auth/logout', { method: 'POST' }),
   me: () => request<User>('/api/auth/me'),
   changePassword: (currentPassword: string, newPassword: string) =>

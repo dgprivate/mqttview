@@ -28,15 +28,21 @@ import (
 	_ "github.com/mqttview/mqttview/internal/plugins/hass"
 )
 
-const adminPassword = "correct-horse-battery"
+const (
+	// The account newTestServer bootstraps. Named so a test cannot drift from
+	// the harness by typing a different address.
+	adminEmail    = "admin@example.com"
+	adminPassword = "correct-horse-battery"
+)
 
 // testServer is a fully wired mqttview, backed by a temporary database.
 type testServer struct {
 	t      *testing.T
 	http   *httptest.Server
 	client *http.Client
-	csrf   string
-	mqtt   *mqttc.Manager
+	// suppressCSRF omits the header, so a test can prove the check bites.
+	suppressCSRF bool
+	mqtt         *mqttc.Manager
 }
 
 func newTestServer(t *testing.T) *testServer {
@@ -63,7 +69,7 @@ func newTestServer(t *testing.T) *testServer {
 
 	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	authSvc := auth.New(db, cfg, box, log)
-	if _, _, err := authSvc.BootstrapAdmin("admin@example.com", adminPassword); err != nil {
+	if _, _, err := authSvc.BootstrapAdmin(adminEmail, adminPassword); err != nil {
 		t.Fatalf("bootstrap admin: %v", err)
 	}
 
@@ -118,8 +124,11 @@ func (ts *testServer) do(method, path string, body any) *http.Response {
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if ts.csrf != "" {
-		req.Header.Set(auth.CSRFHeader, ts.csrf)
+	// Read the token from the jar on every request rather than caching it: a
+	// fresh sign-in issues a new one, and a test that forgets to re-read it
+	// fails with a CSRF error that has nothing to do with what it is testing.
+	if token := ts.csrfToken(); token != "" && !ts.suppressCSRF {
+		req.Header.Set(auth.CSRFHeader, token)
 	}
 
 	resp, err := ts.client.Do(req)
@@ -146,20 +155,25 @@ func (ts *testServer) decode(resp *http.Response, wantStatus int, out any) {
 	}
 }
 
+// csrfToken returns the double-submit token the server last set.
+func (ts *testServer) csrfToken() string {
+	for _, c := range ts.client.Jar.Cookies(mustParseURL(ts.t, ts.http.URL)) {
+		if c.Name == auth.CSRFCookie {
+			return c.Value
+		}
+	}
+	return ""
+}
+
 func (ts *testServer) login() {
 	ts.t.Helper()
 
 	resp := ts.do(http.MethodPost, "/api/auth/login", map[string]string{
-		"email": "admin@example.com", "password": adminPassword,
+		"email": adminEmail, "password": adminPassword,
 	})
 	ts.decode(resp, http.StatusOK, nil)
 
-	for _, c := range ts.client.Jar.Cookies(mustParseURL(ts.t, ts.http.URL)) {
-		if c.Name == auth.CSRFCookie {
-			ts.csrf = c.Value
-		}
-	}
-	if ts.csrf == "" {
+	if ts.csrfToken() == "" {
 		ts.t.Fatal("login did not set a CSRF cookie")
 	}
 }
@@ -178,7 +192,7 @@ func TestLoginRejectsWrongPassword(t *testing.T) {
 	ts := newTestServer(t)
 
 	resp := ts.do(http.MethodPost, "/api/auth/login", map[string]string{
-		"email": "admin@example.com", "password": "wrong",
+		"email": adminEmail, "password": "wrong",
 	})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
@@ -190,14 +204,13 @@ func TestCSRFIsRequiredForWrites(t *testing.T) {
 	ts := newTestServer(t)
 	ts.login()
 
-	saved := ts.csrf
-	ts.csrf = ""
+	ts.suppressCSRF = true
 	resp := ts.do(http.MethodPost, "/api/connections", map[string]any{"name": "x", "url": "tcp://127.0.0.1:1883"})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status without a CSRF header = %d, want 403", resp.StatusCode)
 	}
-	ts.csrf = saved
+	ts.suppressCSRF = false
 }
 
 // TestConnectionLifecycle covers the path a user actually walks: log in,

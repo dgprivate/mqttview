@@ -19,6 +19,7 @@ func (s *Server) mountUsers(r chi.Router) {
 		r.Post("/", s.handleCreateUser)
 		r.Put("/{id}", s.handleUpdateUser)
 		r.Put("/{id}/password", s.handleResetPassword)
+		r.Delete("/{id}/2fa", s.handleClearTwoFactor)
 		r.Delete("/{id}", s.handleDeleteUser)
 	})
 }
@@ -215,4 +216,31 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleClearTwoFactor turns off a user's second factor.
+//
+// This is the lost-phone path: an administrator does it for somebody else, and
+// unlike the self-service route it needs no code, because the whole reason for
+// asking is that the person cannot produce one. It is logged with both names.
+func (s *Server) handleClearTwoFactor(w http.ResponseWriter, r *http.Request) {
+	actor, ok := auth.UserFrom(r.Context())
+	if !ok {
+		httpx.WriteError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+
+	target, err := s.db.GetUser(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.WriteError(w, http.StatusNotFound, "no such user")
+		return
+	}
+	if err := s.auth.DisableTwoFactor(target); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	s.log.Warn("administrator cleared two-factor for another account",
+		"admin", actor.Email, "user", target.Email)
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

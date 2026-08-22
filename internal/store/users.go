@@ -32,6 +32,10 @@ func (r Role) AtLeast(want Role) bool {
 	return rank[r] >= rank[want]
 }
 
+// ProviderLocal marks an account that signs in with a password held here,
+// rather than through an identity provider.
+const ProviderLocal = "local"
+
 // User is an mqttview account. Accounts are created either locally (with a
 // password) or on first SSO login.
 type User struct {
@@ -41,13 +45,25 @@ type User struct {
 	// PasswordHash is empty for SSO-only accounts. Never serialised.
 	PasswordHash string `json:"-"`
 	Role         Role   `json:"role"`
-	// Provider is "local" or the SSO provider ID.
+	// Provider is ProviderLocal or the SSO provider ID.
 	Provider string `json:"provider"`
 	// ProviderSubject is the stable subject claim from the SSO provider.
 	ProviderSubject string     `json:"-"`
 	Disabled        bool       `json:"disabled"`
 	CreatedAt       time.Time  `json:"createdAt"`
 	LastLoginAt     *time.Time `json:"lastLoginAt,omitempty"`
+	// TOTPSecretEnc is the encrypted TOTP seed. Never serialised: the plaintext
+	// seed is shown exactly once, during enrolment, and never again.
+	TOTPSecretEnc string `json:"-"`
+	// TOTPConfirmedAt is set when the user proved they could generate a code.
+	// A secret that was issued but never confirmed does not gate sign-in, so a
+	// half-finished enrolment cannot lock somebody out.
+	TOTPConfirmedAt *time.Time `json:"totpConfirmedAt,omitempty"`
+}
+
+// TwoFactorEnabled reports whether this account must present a second factor.
+func (u User) TwoFactorEnabled() bool {
+	return u.TOTPSecretEnc != "" && u.TOTPConfirmedAt != nil
 }
 
 // NormalizeEmail lowercases and trims an address so lookups are consistent.
@@ -55,7 +71,7 @@ func NormalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
 
-const userColumns = `id, email, name, password_hash, role, provider, provider_subject, disabled, created_at, last_login_at`
+const userColumns = `id, email, name, password_hash, role, provider, provider_subject, disabled, created_at, last_login_at, totp_secret_enc, totp_confirmed_at`
 
 // CreateUser inserts a user. The caller supplies the ID so it can be reused
 // for auditing before the write succeeds.
@@ -68,16 +84,17 @@ func (s *Store) CreateUser(u User) (User, error) {
 		return User{}, fmt.Errorf("store: invalid role %q", u.Role)
 	}
 	if u.Provider == "" {
-		u.Provider = "local"
+		u.Provider = ProviderLocal
 	}
 	if u.CreatedAt.IsZero() {
 		u.CreatedAt = time.Now().UTC()
 	}
 
 	_, err := s.db.Exec(
-		`INSERT INTO users (`+userColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO users (`+userColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		u.ID, u.Email, u.Name, u.PasswordHash, string(u.Role), u.Provider,
-		u.ProviderSubject, boolToInt(u.Disabled), u.CreatedAt.Format(time.RFC3339Nano), nil)
+		u.ProviderSubject, boolToInt(u.Disabled), u.CreatedAt.Format(time.RFC3339Nano), nil,
+		u.TOTPSecretEnc, nil)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return User{}, ErrConflict
@@ -207,9 +224,10 @@ func (s *Store) scanUser(row rowScanner) (User, error) {
 		createdAt  string
 		lastLogin  sql.NullString
 		providerID string
+		totpAt     sql.NullString
 	)
 	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &role, &providerID,
-		&u.ProviderSubject, &disabled, &createdAt, &lastLogin)
+		&u.ProviderSubject, &disabled, &createdAt, &lastLogin, &u.TOTPSecretEnc, &totpAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -223,6 +241,10 @@ func (s *Store) scanUser(row rowScanner) (User, error) {
 	if lastLogin.Valid {
 		t := parseTime(lastLogin.String)
 		u.LastLoginAt = &t
+	}
+	if totpAt.Valid {
+		t := parseTime(totpAt.String)
+		u.TOTPConfirmedAt = &t
 	}
 	return u, nil
 }

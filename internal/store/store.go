@@ -148,6 +148,28 @@ CREATE TABLE settings (
 );
 `,
 	},
+	{
+		name: "0002_two_factor",
+		stmt: `
+-- The TOTP secret is stored encrypted, like every other credential in this
+-- database; the column holds ciphertext, never the base32 seed.
+ALTER TABLE users ADD COLUMN totp_secret_enc TEXT NOT NULL DEFAULT '';
+-- Enrolment is two steps: a secret is issued, then confirmed with a code the
+-- authenticator produced. Only a confirmed secret is asked for at sign-in.
+ALTER TABLE users ADD COLUMN totp_confirmed_at TEXT;
+
+-- Recovery codes are single use and stored hashed, so the database cannot be
+-- read to obtain a way in.
+CREATE TABLE recovery_codes (
+    id       TEXT PRIMARY KEY,
+    user_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    hash     TEXT NOT NULL,
+    used_at  TEXT
+);
+
+CREATE INDEX recovery_codes_user_idx ON recovery_codes(user_id);
+`,
+	},
 }
 
 func (s *Store) migrate() error {

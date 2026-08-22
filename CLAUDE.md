@@ -1,0 +1,149 @@
+# Working on mqttview
+
+Rules for anyone — human or Claude — changing this repository. They exist
+because each one was learned the expensive way; the reasoning is given so you
+can tell when a rule genuinely does not apply rather than guessing.
+
+## What this is
+
+A single Go binary with a React frontend embedded in it. `cmd/mqttview` is the
+server, `internal/` is everything it does, `web/` is the UI, and
+`cmd/mqttview-mcp` is a separate binary that exposes the PLC plugin over MCP.
+
+Data lives in one SQLite file plus an encryption key beside it. There is no
+other state: no cache to warm, no queue, no second service.
+
+## Before you say it is done
+
+Run all of this. Not one of them, all of them:
+
+```bash
+gofmt -l ./cmd ./internal        # must print nothing
+go vet ./...
+go test -race ./...
+golangci-lint run                # config in .golangci.yml
+cd web && npx tsc --noEmit && npm run build
+```
+
+`make build` produces the binary with the frontend baked in.
+
+**Never report work as finished without running the tests.** If they fail, say
+so and show the output. A summary that says "should work" is worth less than
+nothing, because it costs somebody else the time to discover otherwise.
+
+## Tests
+
+**Every change ships with tests.** Not "where it makes sense" — every change. A
+bug fix ships with the test that fails without it. CI enforces a coverage floor
+of 50%; raise it as the number rises, and never lower it to make a build pass.
+
+Write tests that state a property, not tests that restate the implementation:
+
+- Name what must be true: `TestRecoveryCodeIsSpentExactlyOnce`, not `TestUse`.
+- Assert the consequence, not the call. "A used code cannot sign in again" is a
+  test. "UseRecoveryCode was called" is not.
+- When a fuzzer or a linter finds something, commit the input as a regression
+  test. `internal/plugins/hass/testdata/fuzz/` exists for exactly that.
+
+Anything that parses input from a broker, a device or a person gets a fuzz
+target. `go test -fuzz` targets live beside the code they exercise; the CI job
+runs each one on a corpus that grows week to week.
+
+## Things that must not change quietly
+
+Each of these is load-bearing. Changing one is a decision to be discussed, not
+a refactor to be slipped in.
+
+**The image is hardened, and CI checks it.** Unprivileged user 10001, no
+package manager, no setuid binaries, read-only root, every capability dropped,
+an SBOM inside the image. `security/README.md` documents each claim and the
+command that proves it; the `docker` job in CI asserts them. If you change the
+Dockerfile, run that job's checks locally.
+
+Do **not** delete `/lib/apk/db` when trimming the image. It is the installed
+package database, and without it Trivy sees zero OS packages and reports a
+clean image because it cannot find anything to judge. Verify a scan names the
+OS and a package count before believing it.
+
+**Base images are pinned by digest and actions by commit SHA.** A tag is
+mutable, and an action runs with the workflow's token. Renovate moves the pins.
+
+**The PLC command catalogue is an allow-list.** `internal/plugins/plc/command.go`
+enumerates every command the plugin will send. The PLC accepts far more — arming
+the alarm, driving the water valve, wiping persistent state. Adding to that list
+means deciding a browser button may do it in somebody's house. Do not.
+
+**Credentials are encrypted at rest and never returned by the API.** Broker
+passwords, TLS private keys and TOTP secrets go through `internal/secrets`.
+`connectionView` and `User` deliberately omit them; keep it that way.
+
+**Forwarded headers are not trusted by default.** `X-Forwarded-For` is read only
+when `auth.trust_proxy_headers` is on, because the value keys the sign-in rate
+limit and anyone can send that header. Do not reintroduce `middleware.RealIP`.
+
+**A user is loaded through two different queries.** `GetUser` and `SessionUser`
+each have their own column list, and `SessionUser` is what every authenticated
+request uses. Add a column to `users` and you must add it to both, or the field
+will be silently empty for every signed-in user. There is a regression test for
+this in `internal/store/twofactor_test.go`; keep it passing.
+
+## Migrations
+
+Append to the `migrations` slice in `internal/store/store.go`. Never edit a
+migration that has shipped: existing installs have already run it and will not
+run it again. Every migration is applied in a transaction and recorded by name.
+
+## Conventions
+
+**Code and comments in English.** Slovenian belongs in conversation, not in the
+repository.
+
+**Comments explain why, not what.** `// increment i` is noise. `// The limiter
+stays armed until the second factor is in: resetting it here would let an
+attacker who has the password grind the code` is the reason somebody will need
+in a year. Match the density of the surrounding code.
+
+**Errors say what to do about it.** `internal/mqttc/diagnose.go` is the model:
+keep the underlying error, append a hint, never substitute. "context deadline
+exceeded" names the timeout that expired, not the problem.
+
+**Do not invent a second opinion about something the source already decides.**
+The PLC computes current imbalance and raises its own alarm from it; a
+threshold of our own alongside it was wrong and was removed. The same goes for
+units, limits and severities that some other system owns.
+
+**Never guess at a protocol.** The PLC command schema came from reading
+`FB_MqttCommandProcessor.TcPOU` in the podlipa-plc repository, not from a
+plausible-looking example. If the authority for a format is not to hand, say so
+instead of inferring one.
+
+## Frontend
+
+Mobile-first. The base rules target phones and `@media (min-width: 641px)` adds
+what a wider screen affords. Tables need `className="responsive"` **and**
+`data-label` on each cell, or they stay a horizontally scrolling grid on a
+phone — `data-label` alone does nothing. Tap targets are at least 44 px; inputs
+are at least 16 px or iOS zooms on focus.
+
+Check a real render before claiming a layout works. Screenshot both widths.
+Sixty-four tiles that looked fine in the code were an unreadable wall on the
+actual installation.
+
+## Plugins
+
+`docs/PLUGINS.md` is the contract. A plugin observes messages, keeps its own
+state, exposes HTTP routes under `/api/p/<id>/` and pushes events to the
+browser. Batch UI notifications; a broker at 45 messages a second will
+otherwise re-render the page 45 times.
+
+Anything that acts on the world is off by default, needs the operator role, and
+is logged with the user who did it.
+
+## What to ask about rather than decide
+
+- Turning on control for anything physical, or widening what control can reach.
+- Lowering the coverage floor, or disabling a linter rather than justifying an
+  exclusion.
+- Anything that changes what an existing install must do to keep working:
+  the data directory layout, the UID, a migration that drops a column.
+- Publishing anywhere new, or adding a dependency to the sign-in path.

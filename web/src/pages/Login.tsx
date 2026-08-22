@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api } from '../api/client'
+import { api, ApiError } from '../api/client'
 import type { AuthConfig } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import { Alert, Spinner } from '../components/common'
@@ -9,6 +9,9 @@ export function Login() {
   const [config, setConfig] = useState<AuthConfig | null>(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [code, setCode] = useState('')
+  // Set once the server has said the password was right but not sufficient.
+  const [needCode, setNeedCode] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -26,9 +29,20 @@ export function Login() {
     setError('')
     setBusy(true)
     try {
-      await signIn(email, password)
+      await signIn(email, password, code)
+      setNeedCode(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign in failed')
+      // The server distinguishes "wrong password" from "now show me a code",
+      // so the form can ask for the second factor without implying the first
+      // was wrong.
+      const wantsCode = err instanceof ApiError && err.twoFactorRequired
+      setNeedCode(wantsCode)
+      if (wantsCode && !code) {
+        setError('')
+      } else {
+        setError(err instanceof Error ? err.message : 'Sign in failed')
+      }
+      setCode('')
     } finally {
       setBusy(false)
     }
@@ -83,8 +97,29 @@ export function Login() {
                 required
               />
             </div>
+            {needCode && (
+              <div className="field">
+                <label htmlFor="code">Authentication code</label>
+                <input
+                  id="code"
+                  // Not type="number": a leading zero matters and the spinner
+                  // arrows are useless here.
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  autoFocus
+                  placeholder="6 digits, or a recovery code"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  required
+                />
+                <small>
+                  From your authenticator app. If you have lost it, enter one of the recovery codes you saved.
+                </small>
+              </div>
+            )}
             <button type="submit" className="primary" style={{ width: '100%' }} disabled={busy}>
-              {busy ? <span className="spinner" /> : 'Sign in'}
+              {busy ? <span className="spinner" /> : needCode ? 'Verify' : 'Sign in'}
             </button>
           </form>
         )}

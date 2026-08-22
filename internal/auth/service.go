@@ -119,6 +119,41 @@ func (s *Service) Login(ctx context.Context, email, password, clientIP string) (
 		return store.User{}, ErrInvalidCredentials
 	}
 
+	// The password was right, but it is not the whole answer yet. The limiter
+	// stays armed until the second factor is in: resetting it here would let an
+	// attacker who has the password grind the six-digit code without limit.
+	if u.TwoFactorEnabled() {
+		return u, ErrTwoFactorRequired
+	}
+
+	s.limiter.reset(key)
+	if err := s.store.TouchLogin(u.ID); err != nil {
+		s.log.Warn("recording login time failed", "user", u.ID, "error", err)
+	}
+	return u, nil
+}
+
+// CompleteLogin finishes a sign-in that stopped at ErrTwoFactorRequired.
+//
+// The password is presented again rather than a short-lived ticket being
+// issued after the first step: it keeps the whole exchange to one stateless
+// call, and it means a stolen intermediate token is not a thing that exists.
+func (s *Service) CompleteLogin(ctx context.Context, email, password, code, clientIP string) (store.User, error) {
+	u, err := s.Login(ctx, email, password, clientIP)
+	if err != nil && !errors.Is(err, ErrTwoFactorRequired) {
+		return store.User{}, err
+	}
+	if err == nil {
+		// Two-factor was turned off between the two steps; the password alone
+		// was already enough.
+		return u, nil
+	}
+
+	key := strings.ToLower(strings.TrimSpace(email)) + "|" + clientIP
+	if err := s.VerifySecondFactor(ctx, u, code); err != nil {
+		return store.User{}, err
+	}
+
 	s.limiter.reset(key)
 	if err := s.store.TouchLogin(u.ID); err != nil {
 		s.log.Warn("recording login time failed", "user", u.ID, "error", err)
@@ -304,7 +339,7 @@ func (s *Service) BootstrapAdmin(email, password string) (created bool, generate
 		Name:         "Administrator",
 		PasswordHash: hash,
 		Role:         store.RoleAdmin,
-		Provider:     "local",
+		Provider:     store.ProviderLocal,
 	}); err != nil {
 		return false, "", err
 	}

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { Alert, formatRelative } from '../components/common'
+import { TwoFactorCard } from './TwoFactorCard'
 
 export function Account() {
   const { user } = useAuth()
@@ -46,6 +47,8 @@ export function Account() {
           </p>
         </div>
       </div>
+
+      <TwoFactorCard ssoOnly={ssoOnly} provider={user.provider} />
 
       <div className="card">
         <h2>Change password</h2>

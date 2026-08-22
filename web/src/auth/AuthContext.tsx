@@ -7,7 +7,7 @@ import { liveSocket } from '../ws/socket'
 interface AuthState {
   user: User | null
   loading: boolean
-  signIn: (email: string, password: string) => Promise<void>
+  signIn: (email: string, password: string, code?: string) => Promise<void>
   signOut: () => Promise<void>
   /** can reports whether the signed-in user holds at least the given role. */
   can: (role: Role) => boolean
@@ -51,8 +51,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return undefined
   }, [user])
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    setUser(await api.login(email, password))
+  const signIn = useCallback(async (email: string, password: string, code = '') => {
+    setUser(await api.login(email, password, code))
   }, [])
 
   const signOut = useCallback(async () => {

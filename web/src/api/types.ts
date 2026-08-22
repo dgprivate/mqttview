@@ -420,3 +420,13 @@ export interface PlcMapping {
   type?: string
   notes?: string
 }
+
+export interface TwoFactorStatus {
+  enabled: boolean
+  /** A secret has been issued but not yet proved with a code. */
+  pending: boolean
+  confirmedAt?: string
+  recoveryCodesLeft: number
+  requiredByPolicy: boolean
+  requiredForThisUser: boolean
+}

@@ -38,6 +38,9 @@ func (s *Server) handleAuthConfig(w http.ResponseWriter, _ *http.Request) {
 type loginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	// Code is the second factor. Empty on the first call: the client learns it
+	// is needed from the 401 that comes back, then asks again with it.
+	Code string `json:"code"`
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -47,11 +50,23 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	u, err := s.auth.Login(r.Context(), req.Email, req.Password, s.auth.ClientIP(r))
+	u, err := s.auth.CompleteLogin(r.Context(), req.Email, req.Password, req.Code, s.auth.ClientIP(r))
 	if err != nil {
 		switch {
 		case errors.Is(err, auth.ErrLocalLoginDisabled):
 			httpx.WriteError(w, http.StatusForbidden, err.Error())
+		case errors.Is(err, auth.ErrTwoFactorRequired):
+			// A distinct body, so the login form knows to ask for a code
+			// rather than telling the user their password was wrong.
+			httpx.WriteJSON(w, http.StatusUnauthorized, map[string]any{
+				"error":             err.Error(),
+				"twoFactorRequired": true,
+			})
+		case errors.Is(err, auth.ErrInvalidTOTP), errors.Is(err, auth.ErrRecoveryCodeInvalid):
+			httpx.WriteJSON(w, http.StatusUnauthorized, map[string]any{
+				"error":             err.Error(),
+				"twoFactorRequired": true,
+			})
 		case errors.Is(err, auth.ErrInvalidCredentials):
 			httpx.WriteError(w, http.StatusUnauthorized, err.Error())
 		default:
@@ -164,4 +179,134 @@ func (s *Server) requireRole(w http.ResponseWriter, r *http.Request, min store.R
 		return store.User{}, false
 	}
 	return u, true
+}
+
+// --- two-factor -----------------------------------------------------------
+
+func (s *Server) handleTwoFactorStatus(w http.ResponseWriter, r *http.Request) {
+	u, ok := auth.UserFrom(r.Context())
+	if !ok {
+		httpx.WriteError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	status, err := s.auth.TwoFactorStatusFor(u)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, status)
+}
+
+// handleTwoFactorEnrol issues a secret. It is returned exactly once, so the
+// response is the only chance to scan or write it down.
+func (s *Server) handleTwoFactorEnrol(w http.ResponseWriter, r *http.Request) {
+	u, ok := auth.UserFrom(r.Context())
+	if !ok {
+		httpx.WriteError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	enrolment, err := s.auth.BeginTwoFactorEnrolment(u)
+	if err != nil {
+		if errors.Is(err, auth.ErrTwoFactorAlreadyOn) {
+			httpx.WriteError(w, http.StatusConflict, err.Error())
+			return
+		}
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, enrolment)
+}
+
+type twoFactorCodeRequest struct {
+	Code string `json:"code"`
+}
+
+func (s *Server) handleTwoFactorConfirm(w http.ResponseWriter, r *http.Request) {
+	u, ok := auth.UserFrom(r.Context())
+	if !ok {
+		httpx.WriteError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	var req twoFactorCodeRequest
+	if err := httpx.DecodeJSON(w, r, &req); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	codes, err := s.auth.ConfirmTwoFactorEnrolment(u, req.Code)
+	if err != nil {
+		switch {
+		case errors.Is(err, auth.ErrInvalidTOTP):
+			httpx.WriteError(w, http.StatusUnauthorized, err.Error())
+		case errors.Is(err, auth.ErrTwoFactorNotPending), errors.Is(err, auth.ErrTwoFactorAlreadyOn):
+			httpx.WriteError(w, http.StatusConflict, err.Error())
+		default:
+			httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	// Shown once. There is no endpoint that returns them again, only one that
+	// replaces them, because only hashes are kept.
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"recoveryCodes": codes})
+}
+
+type disableTwoFactorRequest struct {
+	// Password re-proves who is asking. Turning off a second factor is exactly
+	// what somebody who found an unlocked screen would want to do.
+	Password string `json:"password"`
+	Code     string `json:"code"`
+}
+
+func (s *Server) handleTwoFactorDisable(w http.ResponseWriter, r *http.Request) {
+	u, ok := auth.UserFrom(r.Context())
+	if !ok {
+		httpx.WriteError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if s.auth.TwoFactorRequired(u) {
+		httpx.WriteError(w, http.StatusForbidden,
+			"this server requires two-factor authentication; it cannot be turned off")
+		return
+	}
+
+	var req disableTwoFactorRequest
+	if err := httpx.DecodeJSON(w, r, &req); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := s.auth.CompleteLogin(r.Context(), u.Email, req.Password, req.Code, s.auth.ClientIP(r)); err != nil {
+		httpx.WriteError(w, http.StatusUnauthorized, "password or code is not correct")
+		return
+	}
+	if err := s.auth.DisableTwoFactor(u); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleRegenerateRecoveryCodes(w http.ResponseWriter, r *http.Request) {
+	u, ok := auth.UserFrom(r.Context())
+	if !ok {
+		httpx.WriteError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	var req twoFactorCodeRequest
+	if err := httpx.DecodeJSON(w, r, &req); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// A fresh set invalidates the old ones, so it needs the same proof as
+	// signing in does.
+	if err := s.auth.VerifySecondFactor(r.Context(), u, req.Code); err != nil {
+		httpx.WriteError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	codes, err := s.auth.RegenerateRecoveryCodes(u)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"recoveryCodes": codes})
 }

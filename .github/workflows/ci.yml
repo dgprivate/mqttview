@@ -47,6 +47,28 @@ jobs:
       - name: Test
         run: go test -race -timeout 5m ./...
 
+      # A floor rather than a target. It exists so coverage cannot quietly rot:
+      # a change that deletes tests fails here instead of being noticed months
+      # later. Raise it when the number rises; never lower it to make a build
+      # pass.
+      - name: Coverage
+        run: |
+          go test -coverpkg=./internal/...,./cmd/... -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out | tail -1
+
+          total=$(go tool cover -func=coverage.out | tail -1 | grep -oE '[0-9]+\.[0-9]+')
+          floor=50.0
+          echo "total ${total}%, floor ${floor}%"
+          awk -v t="$total" -v f="$floor" 'BEGIN { if (t+0 < f+0) { print "coverage fell below the floor"; exit 1 } }'
+
+      - name: Keep the coverage profile
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 14
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
