@@ -65,6 +65,9 @@ type AuthConfig struct {
 	AllowSignup bool `yaml:"allow_signup"`
 	// Providers are OIDC/OAuth2 single sign-on providers, keyed by ID.
 	Providers map[string]ProviderConfig `yaml:"providers"`
+	// SAMLProviders are SAML 2.0 identity providers, keyed by ID. The ID
+	// namespace is shared with Providers, so the two cannot collide.
+	SAMLProviders map[string]SAMLProviderConfig `yaml:"saml_providers"`
 }
 
 // ProviderConfig is one SSO provider. Any standards-compliant OIDC issuer
@@ -80,6 +83,32 @@ type ProviderConfig struct {
 	Scopes       []string `yaml:"scopes"`
 	// AllowedDomains restricts login to these email domains. Empty means
 	// any domain the provider vouches for is accepted.
+	AllowedDomains []string `yaml:"allowed_domains"`
+	// AdminEmails are granted the admin role on first login.
+	AdminEmails []string `yaml:"admin_emails"`
+}
+
+// SAMLProviderConfig is one SAML 2.0 identity provider.
+//
+// SAML predates OIDC and says nothing about how attributes are named, so the
+// email and name attributes are configurable; the defaults cover the URNs that
+// Entra ID, Okta, Keycloak and Authentik actually send.
+type SAMLProviderConfig struct {
+	Enabled bool `yaml:"enabled"`
+	// DisplayName is what the login button says, e.g. "Company SSO".
+	DisplayName string `yaml:"display_name"`
+	// MetadataURL is fetched at startup to learn the IdP's endpoints and
+	// signing certificates. Use MetadataFile instead for an air-gapped IdP.
+	MetadataURL  string `yaml:"metadata_url"`
+	MetadataFile string `yaml:"metadata_file"`
+	// EntityID identifies this service provider to the IdP. Empty defaults to
+	// the metadata URL, which is the usual convention.
+	EntityID string `yaml:"entity_id"`
+	// EmailAttribute and NameAttribute name the assertion attributes to read.
+	// Empty means try the common ones in turn.
+	EmailAttribute string `yaml:"email_attribute"`
+	NameAttribute  string `yaml:"name_attribute"`
+	// AllowedDomains restricts login to these email domains.
 	AllowedDomains []string `yaml:"allowed_domains"`
 	// AdminEmails are granted the admin role on first login.
 	AdminEmails []string `yaml:"admin_emails"`
@@ -103,6 +132,7 @@ func Default() Config {
 			AllowLocal:      true,
 			AllowSignup:     false,
 			Providers:       map[string]ProviderConfig{},
+			SAMLProviders:   map[string]SAMLProviderConfig{},
 		},
 		Plugins: map[string]PluginConfig{},
 	}
@@ -131,6 +161,9 @@ func Load(path string) (Config, error) {
 
 	if cfg.Auth.Providers == nil {
 		cfg.Auth.Providers = map[string]ProviderConfig{}
+	}
+	if cfg.Auth.SAMLProviders == nil {
+		cfg.Auth.SAMLProviders = map[string]SAMLProviderConfig{}
 	}
 	if cfg.Plugins == nil {
 		cfg.Plugins = map[string]PluginConfig{}
@@ -222,6 +255,17 @@ func (c Config) validate() error {
 	if !c.Auth.AllowLocal && !c.hasEnabledProvider() {
 		return errors.New("auth.allow_local is false and no SSO provider is enabled: nobody could log in")
 	}
+	for id, p := range c.Auth.SAMLProviders {
+		if _, clash := c.Auth.Providers[id]; clash {
+			return fmt.Errorf("auth.saml_providers.%s: an OIDC provider already uses that id", id)
+		}
+		if !p.Enabled {
+			continue
+		}
+		if p.MetadataURL == "" && p.MetadataFile == "" {
+			return fmt.Errorf("auth.saml_providers.%s: metadata_url or metadata_file is required", id)
+		}
+	}
 	for id, p := range c.Auth.Providers {
 		if !p.Enabled {
 			continue
@@ -242,7 +286,23 @@ func (c Config) hasEnabledProvider() bool {
 			return true
 		}
 	}
+	for _, p := range c.Auth.SAMLProviders {
+		if p.Enabled {
+			return true
+		}
+	}
 	return false
+}
+
+// SAMLMetadataURL is where this service publishes its SP metadata, and the
+// entity ID it uses by default.
+func (c Config) SAMLMetadataURL(providerID string) string {
+	return c.BaseURL + "/api/auth/saml/" + providerID + "/metadata"
+}
+
+// SAMLACSURL is where the identity provider posts its assertion.
+func (c Config) SAMLACSURL(providerID string) string {
+	return c.BaseURL + "/api/auth/saml/" + providerID + "/acs"
 }
 
 // RedirectURI is the OAuth2 callback URL for a provider.

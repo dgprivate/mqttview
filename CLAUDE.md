@@ -112,6 +112,12 @@ The PLC computes current imbalance and raises its own alarm from it; a
 threshold of our own alongside it was wrong and was removed. The same goes for
 units, limits and severities that some other system owns.
 
+**SAML signature verification is not ours to reimplement.** `crewjam/saml`
+wraps `goxmldsig`, and a mistake in signature handling over canonicalised XML
+is a silent authentication bypass, not a visible bug. Keep both dependencies
+current: govulncheck caught a signature-bypass advisory in goxmldsig within
+minutes of it being added here, and that is the whole reason the job exists.
+
 **Never guess at a protocol.** The PLC command schema came from reading
 `FB_MqttCommandProcessor.TcPOU` in the podlipa-plc repository, not from a
 plausible-looking example. If the authority for a format is not to hand, say so

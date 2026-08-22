@@ -65,6 +65,11 @@ type Service struct {
 
 	mu        sync.RWMutex
 	providers map[string]*ssoProvider
+
+	// dataDir is where the SAML service provider keypair lives, beside the
+	// encryption key.
+	dataDir string
+	saml    samlCache
 }
 
 // New builds the auth service. OIDC providers are resolved lazily on first
@@ -82,6 +87,7 @@ func New(st *store.Store, cfg config.Config, box *secrets.Box, log *slog.Logger)
 		log:       log,
 		limiter:   newAttemptLimiter(10, 15*time.Minute),
 		providers: map[string]*ssoProvider{},
+		dataDir:   cfg.DataDir,
 	}
 }
 

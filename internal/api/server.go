@@ -97,6 +97,14 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/sso/{provider}/start", s.handleSSOStart)
 			r.Get("/sso/{provider}/callback", s.handleSSOCallback)
 
+			// SAML. The assertion arrives as a cross-site POST from the
+			// identity provider, so the ACS route cannot carry a CSRF token;
+			// the signed assertion and the one-shot request ID are what make
+			// it safe, and it lives outside the CSRF group for that reason.
+			r.Get("/saml/{provider}/metadata", s.handleSAMLMetadata)
+			r.Get("/saml/{provider}/start", s.handleSAMLStart)
+			r.Post("/saml/{provider}/acs", s.handleSAMLACS)
+
 			r.Group(func(r chi.Router) {
 				r.Use(s.auth.Middleware, s.auth.CSRF)
 				r.Get("/me", s.handleMe)

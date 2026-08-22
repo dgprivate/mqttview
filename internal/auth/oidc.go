@@ -276,7 +276,15 @@ func (s *Service) CompleteSSO(w http.ResponseWriter, r *http.Request, id string)
 // resolveSSOUser maps a verified SSO identity to an mqttview account,
 // creating or linking one when policy allows.
 func (s *Service) resolveSSOUser(sp *ssoProvider, subject, email, name string) (store.User, error) {
-	if u, err := s.store.GetUserByProviderSubject(sp.id, subject); err == nil {
+	return s.resolveFederatedUser(sp.id, subject, email, name, sp.cfg.AdminEmails)
+}
+
+// resolveFederatedUser maps a verified identity from any protocol to an
+// mqttview account, creating or linking one when policy allows. OIDC and SAML
+// differ in how they prove who somebody is and agree on everything after that,
+// so the agreeing part lives here once.
+func (s *Service) resolveFederatedUser(providerID, subject, email, name string, adminEmails []string) (store.User, error) {
+	if u, err := s.store.GetUserByProviderSubject(providerID, subject); err == nil {
 		if u.Disabled {
 			return store.User{}, errors.New("auth: this account is disabled")
 		}
@@ -294,10 +302,10 @@ func (s *Service) resolveSSOUser(sp *ssoProvider, subject, email, name string) (
 		if u.ProviderSubject != "" && u.ProviderSubject != subject {
 			return store.User{}, errors.New("auth: this email is already linked to a different identity")
 		}
-		if err := s.store.LinkProvider(u.ID, sp.id, subject); err != nil {
+		if err := s.store.LinkProvider(u.ID, providerID, subject); err != nil {
 			return store.User{}, err
 		}
-		u.Provider = sp.id
+		u.Provider = providerID
 		u.ProviderSubject = subject
 		return u, nil
 	} else if !errors.Is(err, store.ErrNotFound) {
@@ -309,7 +317,7 @@ func (s *Service) resolveSSOUser(sp *ssoProvider, subject, email, name string) (
 	}
 
 	role := store.RoleViewer
-	for _, admin := range sp.cfg.AdminEmails {
+	for _, admin := range adminEmails {
 		if store.NormalizeEmail(admin) == email {
 			role = store.RoleAdmin
 			break
@@ -324,7 +332,7 @@ func (s *Service) resolveSSOUser(sp *ssoProvider, subject, email, name string) (
 		Email:           email,
 		Name:            name,
 		Role:            role,
-		Provider:        sp.id,
+		Provider:        providerID,
 		ProviderSubject: subject,
 	})
 }

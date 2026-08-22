@@ -56,6 +56,13 @@ export function Login() {
     )
   }
 
+  // OIDC and SAML land on different start URLs, but to somebody signing in
+  // they are the same button.
+  const federated = [
+    ...config.providers.map((p) => ({ ...p, kind: 'sso' as const })),
+    ...config.samlProviders.map((p) => ({ ...p, kind: 'saml' as const })),
+  ]
+
   return (
     <div className="login-wrap">
       <div className="login-card">
@@ -124,22 +131,22 @@ export function Login() {
           </form>
         )}
 
-        {config.allowLocal && config.providers.length > 0 && <div className="divider">or</div>}
+        {config.allowLocal && federated.length > 0 && <div className="divider">or</div>}
 
         <div className="stack">
-          {config.providers.map((p) => (
+          {federated.map((p) => (
             <a
-              key={p.id}
+              key={`${p.kind}:${p.id}`}
               className="btn"
               style={{ width: '100%' }}
-              href={`/api/auth/sso/${p.id}/start?next=${encodeURIComponent(window.location.pathname)}`}
+              href={`/api/auth/${p.kind}/${p.id}/start?next=${encodeURIComponent(window.location.pathname)}`}
             >
               Continue with {p.displayName}
             </a>
           ))}
         </div>
 
-        {!config.allowLocal && config.providers.length === 0 && (
+        {!config.allowLocal && federated.length === 0 && (
           <Alert kind="error">
             No sign-in method is enabled. Check the auth section of the server configuration.
           </Alert>

@@ -14,8 +14,11 @@ import (
 
 // authConfigResponse tells the login page what it may offer.
 type authConfigResponse struct {
-	AllowLocal bool                `json:"allowLocal"`
-	Providers  []auth.ProviderInfo `json:"providers"`
+	AllowLocal bool `json:"allowLocal"`
+	// Providers are OIDC; SAMLProviders are SAML. They are separate because
+	// the login page sends the browser to a different URL for each.
+	Providers     []auth.ProviderInfo `json:"providers"`
+	SAMLProviders []auth.ProviderInfo `json:"samlProviders"`
 	// NeedsBootstrap is true when no account exists yet, so the UI can point
 	// the operator at the generated admin credentials in the server log.
 	NeedsBootstrap bool `json:"needsBootstrap"`
@@ -31,6 +34,7 @@ func (s *Server) handleAuthConfig(w http.ResponseWriter, _ *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, authConfigResponse{
 		AllowLocal:     s.cfg.Auth.AllowLocal,
 		Providers:      s.auth.ProviderInfos(),
+		SAMLProviders:  s.auth.SAMLProviderInfos(),
 		NeedsBootstrap: count == 0,
 	})
 }
@@ -309,4 +313,54 @@ func (s *Server) handleRegenerateRecoveryCodes(w http.ResponseWriter, r *http.Re
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"recoveryCodes": codes})
+}
+
+// --- SAML -----------------------------------------------------------------
+
+// handleSAMLMetadata publishes this service provider's metadata, which is the
+// document an identity provider is configured with.
+func (s *Server) handleSAMLMetadata(w http.ResponseWriter, r *http.Request) {
+	provider := chi.URLParam(r, "provider")
+
+	metadata, err := s.auth.SAMLMetadata(r.Context(), provider)
+	if err != nil {
+		s.log.Warn("building SAML metadata failed", "provider", provider, "error", err)
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/samlmetadata+xml")
+	// Not user input: the document is built by the SAML library from this
+	// server's own configuration and its own certificate. It is served as XML
+	// metadata rather than HTML, and the global nosniff header stops a browser
+	// deciding otherwise.
+	if _, err := w.Write(metadata); err != nil { //nolint:gosec // G705: see above
+		s.log.Debug("writing SAML metadata failed", "error", err)
+	}
+}
+
+func (s *Server) handleSAMLStart(w http.ResponseWriter, r *http.Request) {
+	provider := chi.URLParam(r, "provider")
+
+	redirectURL, err := s.auth.StartSAML(w, r, provider, r.URL.Query().Get("next"))
+	if err != nil {
+		s.log.Warn("starting SAML failed", "provider", provider, "error", err)
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	http.Redirect(w, r, redirectURL, http.StatusFound)
+}
+
+func (s *Server) handleSAMLACS(w http.ResponseWriter, r *http.Request) {
+	provider := chi.URLParam(r, "provider")
+
+	user, next, err := s.auth.CompleteSAML(w, r, provider)
+	if err != nil {
+		s.log.Warn("SAML assertion failed", "provider", provider, "error", err)
+		// Back to the login page with a readable reason, rather than dumping
+		// XML or JSON into the address bar.
+		http.Redirect(w, r, "/login?error="+url.QueryEscape(err.Error()), http.StatusFound)
+		return
+	}
+	s.log.Info("SAML login", "provider", provider, "user", user.Email)
+	http.Redirect(w, r, next, http.StatusFound)
 }

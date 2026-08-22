@@ -33,6 +33,20 @@ auth:
   # Username and password sign-in. Set to false to require SSO.
   allow_local: true
 
+  # Require a second factor on every local account. SSO accounts are exempt:
+  # they authenticate at the identity provider, which is where their second
+  # factor belongs. Users enrol from the account page.
+  require_two_factor: false
+  # What an authenticator app shows beside the account. Defaults to "mqttview";
+  # set it when you run more than one instance.
+  two_factor_issuer: ""
+
+  # Read X-Forwarded-For when working out who a request came from. Leave this
+  # off unless a proxy in front strips and rewrites that header: the value keys
+  # the sign-in rate limit, and a client that can pick its own address defeats
+  # the limit by changing it every attempt.
+  trust_proxy_headers: false
+
   # Whether a verified SSO identity with no matching account may create one.
   # With false, an admin creates the user first (password left blank) and SSO
   # links to it by email address.

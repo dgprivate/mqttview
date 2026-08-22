@@ -20,6 +20,7 @@ export interface ProviderInfo {
 }
 
 export interface AuthConfig {
+  samlProviders: ProviderInfo[]
   allowLocal: boolean
   providers: ProviderInfo[]
   needsBootstrap: boolean

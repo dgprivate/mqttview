@@ -47,8 +47,12 @@ the same broker as either a topic tree or a set of devices.
 **Access control**
 
 - Local accounts with argon2id password hashing
-- Optional single sign-on through any OIDC provider — Google, Authentik, Keycloak,
-  Okta, Entra ID — with PKCE, nonce checking and domain allow-lists
+- Two-factor authentication: TOTP (RFC 6238) with single-use recovery codes,
+  optional per account or required for every local account
+- Single sign-on two ways: **OIDC** through any compliant issuer — Google,
+  Authentik, Keycloak, Okta, Entra ID — with PKCE and nonce checking, and
+  **SAML 2.0** with signed assertions, published SP metadata and attribute
+  mapping. Both honour domain allow-lists and can grant admin on first login
 - Three roles: `viewer` reads, `operator` publishes and controls, `admin`
   manages brokers, users and plugins
 - Session cookies are `HttpOnly` and stored hashed; writes require a

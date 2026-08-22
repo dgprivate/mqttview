@@ -39,6 +39,16 @@ Think of an mqttview instance as being as sensitive as the brokers it can reach:
 - Double-submit CSRF tokens on every state-changing request
 - WebSocket origin checks derived from `base_url`
 - OIDC with PKCE and nonce verification; unverified email claims are rejected
+- SAML 2.0 assertions verified for signature, audience, conditions and
+  timestamps against exactly one expected request ID, so an assertion minted for
+  another login cannot be replayed into this one
+- Two-factor authentication is TOTP (RFC 6238) with a one-step drift window and
+  constant-time comparison. Secrets are encrypted at rest and recovery codes are
+  single use and hashed. An enrolment is not enforced until a code proves it, so
+  a half-finished setup cannot lock an account out, and the sign-in rate limiter
+  stays armed between the password and the code
+- `X-Forwarded-For` is trusted only when `auth.trust_proxy_headers` is on,
+  because that value keys the sign-in rate limit
 - A strict Content-Security-Policy, `X-Frame-Options: DENY` and `nosniff`
 - Bounded request bodies, and `DisallowUnknownFields` on JSON decoding
 - Broker passwords and private keys are never returned by the API
