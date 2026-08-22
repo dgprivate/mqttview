@@ -511,9 +511,9 @@ type watchdogView struct {
 
 type electricityView struct {
 	Name             string    `json:"name"`
-	Voltages         []float64 `json:"voltages"`
-	Currents         []float64 `json:"currents"`
-	Frequency        float64   `json:"frequency"`
+	VoltagesV        []float64 `json:"voltages_v"`
+	CurrentsA        []float64 `json:"currents_a"`
+	FrequencyHz      float64   `json:"frequency_hz"`
 	VoltageImbalance float64   `json:"voltage_imbalance_percent"`
 	CurrentImbalance float64   `json:"current_imbalance_percent"`
 	AlarmActive      bool      `json:"alarm_active"`
@@ -524,6 +524,9 @@ type meterView struct {
 	Name      string             `json:"name"`
 	Available bool               `json:"available"`
 	Readings  map[string]float64 `json:"readings,omitempty"`
+	// Units is keyed like Readings and holds only the keys whose unit the
+	// plugin knows; a number without one is published bare by the meter.
+	Units map[string]string `json:"units,omitempty"`
 }
 
 func (t *tools) overview(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, overviewOutput, error) {
@@ -571,9 +574,9 @@ func (t *tools) overview(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}
 	for _, e := range state.Electricity {
 		out.Electricity = append(out.Electricity, electricityView{
 			Name:             e.Name,
-			Voltages:         []float64{e.Phases[0].Voltage, e.Phases[1].Voltage, e.Phases[2].Voltage},
-			Currents:         []float64{e.Phases[0].Current, e.Phases[1].Current, e.Phases[2].Current},
-			Frequency:        e.Frequency,
+			VoltagesV:        []float64{e.Phases[0].Voltage, e.Phases[1].Voltage, e.Phases[2].Voltage},
+			CurrentsA:        []float64{e.Phases[0].Current, e.Phases[1].Current, e.Phases[2].Current},
+			FrequencyHz:      e.Frequency,
 			VoltageImbalance: e.VoltageImbalance,
 			CurrentImbalance: e.CurrentImbalance,
 			AlarmActive:      e.AlarmActive,
@@ -581,7 +584,9 @@ func (t *tools) overview(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}
 		})
 	}
 	for _, m := range state.Meters {
-		out.Meters = append(out.Meters, meterView{Name: m.Name, Available: m.Available, Readings: m.Readings})
+		out.Meters = append(out.Meters, meterView{
+			Name: m.Name, Available: m.Available, Readings: m.Readings, Units: m.Units,
+		})
 	}
 	return nil, out, nil
 }

@@ -149,7 +149,10 @@ type Meter struct {
 	Name         string             `json:"name"`
 	Available    bool               `json:"available"`
 	Readings     map[string]float64 `json:"readings,omitempty"`
-	UpdatedAt    time.Time          `json:"updatedAt"`
+	// Units is keyed the same as Readings, and holds only the keys whose unit
+	// is known. A missing key means the number is published without one.
+	Units     map[string]string `json:"units,omitempty"`
+	UpdatedAt time.Time         `json:"updatedAt"`
 }
 
 // Bridge is the health of whatever gateway publishes on the PLC's behalf.

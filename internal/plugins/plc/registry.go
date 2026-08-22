@@ -24,7 +24,7 @@ type connState struct {
 	actuators map[string]*Actuator // keyed by group/slug
 	meters    map[string]*Meter    // keyed by meter name
 	meta      map[string]sensorMeta
-	mappings  map[string]Mapping // human names, keyed by PLC point name
+	mappings  map[string]Mapping      // human names, keyed by PLC point name
 	elec      map[string]*Electricity // keyed by metering point name
 	watchdog  *Watchdog
 	bridge    *Bridge
@@ -407,10 +407,10 @@ func applyWatchdog(c *connState, connID, topic string, payload []byte, received 
 
 func applyBridge(c *connState, connID, topic string, payload []byte, received time.Time) bool {
 	var raw struct {
-		Source        string  `json:"source"`
-		NodeRedVer    string  `json:"nodered_version"`
-		UptimeHours   float64 `json:"uptime_hours"`
-		Memory        struct {
+		Source      string  `json:"source"`
+		NodeRedVer  string  `json:"nodered_version"`
+		UptimeHours float64 `json:"uptime_hours"`
+		Memory      struct {
 			RSSMB float64 `json:"rss_mb"`
 		} `json:"memory"`
 		OS struct {
@@ -596,6 +596,7 @@ func (r *Registry) Snapshot(connID string) State {
 		}
 		for _, m := range c.meters {
 			cm := *m
+			cm.Units = unitsFor(cm.Readings)
 			out.Summary.Meters++
 			out.Meters = append(out.Meters, &cm)
 		}

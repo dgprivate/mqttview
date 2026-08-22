@@ -324,6 +324,8 @@ export interface PlcMeter {
   name: string
   available: boolean
   readings?: Record<string, number>
+  /** Keyed like readings; a missing key means the meter publishes no unit. */
+  units?: Record<string, string>
   updatedAt: string
 }
 

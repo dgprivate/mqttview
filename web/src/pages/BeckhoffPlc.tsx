@@ -922,9 +922,9 @@ function PowerView({ state }: { state: PlcState }) {
                 <dt>{k.replace(/_/g, ' ')}</dt>
                 <dd className="mono">
                   {v}
-                  {/* The meter publishes bare numbers with no units, so only the
-                      one the key names unambiguously is annotated. */}
-                  {k.endsWith('_temperature') ? ' °C' : ''}
+                  {/* Units come from the plugin, so the panel, the API and the
+                      MCP server all report the same thing. */}
+                  {m.units?.[k] ? ` ${m.units[k]}` : ''}
                 </dd>
               </div>
             ))}
