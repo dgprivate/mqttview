@@ -45,6 +45,12 @@ type TLSConfig struct {
 type AuthConfig struct {
 	// SessionTTLHours is how long a login session stays valid.
 	SessionTTLHours int `yaml:"session_ttl_hours"`
+	// TrustProxyHeaders makes mqttview believe X-Forwarded-For when working
+	// out who a request came from. Off by default, and it must stay off
+	// unless a proxy in front strips and rewrites that header: the value keys
+	// the sign-in rate limit, and a client that can choose its own address
+	// defeats the limit by changing it every attempt.
+	TrustProxyHeaders bool `yaml:"trust_proxy_headers"`
 	// AllowLocal enables username+password login. Disable it to force SSO.
 	AllowLocal bool `yaml:"allow_local"`
 	// AllowSignup lets unknown SSO identities create an account on first
@@ -139,6 +145,9 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("MQTTVIEW_BASE_URL"); v != "" {
 		cfg.BaseURL = v
+	}
+	if v := os.Getenv("MQTTVIEW_TRUST_PROXY_HEADERS"); v != "" {
+		cfg.Auth.TrustProxyHeaders = v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")
 	}
 	if v := os.Getenv("MQTTVIEW_DATA_DIR"); v != "" {
 		cfg.DataDir = v

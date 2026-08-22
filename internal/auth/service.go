@@ -140,7 +140,7 @@ func (s *Service) IssueSession(w http.ResponseWriter, r *http.Request, u store.U
 		UserID:    u.ID,
 		ExpiresAt: expires,
 		UserAgent: truncate(r.UserAgent(), 255),
-		IP:        clientIP(r),
+		IP:        s.ClientIP(r),
 	}); err != nil {
 		return err
 	}
@@ -335,14 +335,21 @@ func hashToken(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func clientIP(r *http.Request) string {
-	// Behind a reverse proxy the first XFF entry is the closest thing to the
-	// real client. It is advisory only: used for rate limiting and display.
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if first, _, ok := strings.Cut(xff, ","); ok {
-			return strings.TrimSpace(first)
+// ClientIP works out who a request came from.
+//
+// X-Forwarded-For is read only when the operator has said a proxy is in front,
+// because anyone can send that header. The value keys the sign-in rate limit,
+// so trusting it unconditionally would let a client pick a new identity for
+// every attempt and never be throttled. With no trusted proxy, the peer address
+// is the only thing that cannot be forged.
+func (s *Service) ClientIP(r *http.Request) string {
+	if s.cfg.TrustProxyHeaders {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			if first, _, ok := strings.Cut(xff, ","); ok {
+				return strings.TrimSpace(first)
+			}
+			return strings.TrimSpace(xff)
 		}
-		return strings.TrimSpace(xff)
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

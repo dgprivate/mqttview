@@ -1,0 +1,49 @@
+name: scorecard
+
+# OpenSSF Scorecard grades the supply chain around this repository: whether
+# dependencies are pinned, whether something keeps them moving, whether workflow
+# tokens are least-privilege, whether releases are signed. The result is
+# published so the badge in README.md can read it.
+
+on:
+  push:
+    branches: [main]
+  branch_protection_rule:  # Scorecard grades these, so re-run when they change
+  schedule:
+    - cron: '30 5 * * 1'
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  analysis:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write  # Upload the findings to the Security tab
+      id-token: write  # Publish the result, which is what the badge reads
+      contents: read
+      actions: read
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc  # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Keep the result as an artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: scorecard-results
+          path: results.sarif
+          retention-days: 5
+
+      - name: Upload to the Security tab
+        uses: github/codeql-action/upload-sarif@42947a340483f03ba47bb1a039b2c519aab3df85  # v3.37.8
+        with:
+          sarif_file: results.sarif

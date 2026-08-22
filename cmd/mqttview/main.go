@@ -50,12 +50,19 @@ func run() error {
 		bootstrapEmail = flag.String("bootstrap-email", envOr("MQTTVIEW_BOOTSTRAP_EMAIL", ""), "email for the admin account created on first run")
 		bootstrapPass  = flag.String("bootstrap-password", os.Getenv("MQTTVIEW_BOOTSTRAP_PASSWORD"), "password for that account; generated if empty")
 		showVersion    = flag.Bool("version", false, "print the version and exit")
+		healthCheck    = flag.Bool("health-check", false, "query the health endpoint of a running instance and exit")
 	)
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Println("mqttview", version)
 		return nil
+	}
+
+	// The container's HEALTHCHECK runs this rather than curl or wget, so the
+	// image needs no shell utilities to report whether it is up.
+	if *healthCheck {
+		return probeHealth(*addr)
 	}
 
 	log := newLogger(*logLevel)
@@ -260,4 +267,38 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// probeHealth asks a running instance whether it is healthy and turns the
+// answer into an exit status, which is all a container HEALTHCHECK reads.
+//
+// It talks to the loopback address rather than to whatever the server binds,
+// because the check runs inside the same network namespace and the endpoint is
+// not meant to be reachable from outside it.
+func probeHealth(addr string) error {
+	if addr == "" {
+		addr = envOr("MQTTVIEW_ADDR", "127.0.0.1:8114")
+	}
+	// A bind address of 0.0.0.0 or :port is not something to connect to.
+	if i := strings.LastIndex(addr, ":"); i >= 0 {
+		addr = "127.0.0.1" + addr[i:]
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+"/api/health", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("health check: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("health check: %s", resp.Status)
+	}
+	return nil
 }

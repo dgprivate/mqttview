@@ -356,11 +356,11 @@ func (s *Server) handleDisconnect(w http.ResponseWriter, r *http.Request) {
 
 // publishRequest accepts either a UTF-8 string payload or base64 for binary.
 type publishRequest struct {
-	Topic          string             `json:"topic"`
-	Payload        string             `json:"payload"`
-	PayloadEncoded bool               `json:"payloadBase64"`
-	QoS            byte               `json:"qos"`
-	Retain         bool               `json:"retain"`
+	Topic          string              `json:"topic"`
+	Payload        string              `json:"payload"`
+	PayloadEncoded bool                `json:"payloadBase64"`
+	QoS            byte                `json:"qos"`
+	Retain         bool                `json:"retain"`
 	Props          *mqttc.MessageProps `json:"props,omitempty"`
 }
 

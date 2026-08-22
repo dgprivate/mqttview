@@ -1,0 +1,54 @@
+# Mirrors what CI enforces, so a push does not have to be the thing that tells
+# you. Install with:
+#
+#   pre-commit install
+#
+# Everything here runs locally; nothing reaches out to a network except the
+# hook repositories on first install.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-yaml
+        # The workflow files use GitHub's expression syntax, which is valid YAML
+        # but confuses the parser's multi-document handling in places.
+        args: [--allow-multiple-documents]
+      - id: check-json
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      # A secret in a commit is a secret in the history for good.
+      - id: detect-private-key
+
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        entry: gofmt -l -w
+        language: system
+        types: [go]
+
+      - id: go-vet
+        name: go vet
+        entry: go vet ./...
+        language: system
+        types: [go]
+        pass_filenames: false
+
+      - id: go-test
+        name: go test
+        entry: go test ./...
+        language: system
+        types: [go]
+        pass_filenames: false
+
+      - id: tsc
+        name: tsc --noEmit
+        entry: bash -c 'cd web && npx tsc --noEmit'
+        language: system
+        files: ^web/src/.*\.(ts|tsx)$
+        pass_filenames: false

@@ -1,0 +1,47 @@
+name: codeql
+
+# Static analysis of both halves of the product. Runs on pushes and pull
+# requests so a finding shows up while the change is still being reviewed, and
+# weekly, because CodeQL's queries keep improving after the code has stopped
+# changing.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '25 5 * * 1'
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  analyze:
+    name: Analyse ${{ matrix.language }}
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write  # Report findings to the Security tab
+      contents: read
+      actions: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go, javascript-typescript]
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@42947a340483f03ba47bb1a039b2c519aab3df85  # v3.37.8
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+
+      - name: Analyse
+        uses: github/codeql-action/analyze@42947a340483f03ba47bb1a039b2c519aab3df85  # v3.37.8
+        with:
+          category: /language:${{ matrix.language }}

@@ -1,5 +1,10 @@
 # mqttview
 
+[![CI](https://github.com/dgprivate/mqttview/actions/workflows/ci.yml/badge.svg)](https://github.com/dgprivate/mqttview/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/dgprivate/mqttview/actions/workflows/codeql.yml/badge.svg)](https://github.com/dgprivate/mqttview/actions/workflows/codeql.yml)
+[![Trivy](https://github.com/dgprivate/mqttview/actions/workflows/trivy.yml/badge.svg)](https://github.com/dgprivate/mqttview/actions/workflows/trivy.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/dgprivate/mqttview/badge)](https://scorecard.dev/viewer/?uri=github.com/dgprivate/mqttview)
+
 A realtime web UI for MQTT brokers — every protocol version, every transport,
 proper authentication, and a plugin system that can turn raw topics into
 something you actually recognise.
@@ -278,6 +283,26 @@ protocol packets rather than mocks:
 
 ```bash
 go test ./...
+```
+
+## Hardening
+
+The image runs unprivileged with no Linux capabilities, a read-only root
+filesystem, no package manager and no setuid binaries, and it carries a
+CycloneDX SBOM of itself. Every base image is pinned by digest and every GitHub
+Action by commit SHA, with Renovate moving both. CI runs CodeQL over the Go and
+the TypeScript, govulncheck, `npm audit`, golangci-lint, a Trivy scan that fails
+on a fixable HIGH or CRITICAL, and coverage-guided fuzzing of the parsers that
+read input mqttview does not control. Published images are signed with keyless
+cosign and carry SBOM and provenance attestations.
+
+[`security/README.md`](security/README.md) has the CIS Docker Benchmark table,
+the command that verifies each claim, and what is deliberately not claimed.
+
+```bash
+# Check the claims rather than the badges
+docker compose run --rm --entrypoint /bin/sh mqttview -c 'id; grep CapEff /proc/self/status'
+docker run --rm --entrypoint cat mqttview:latest /usr/share/mqttview/sbom.cdx.json | head
 ```
 
 ## Security notes

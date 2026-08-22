@@ -1,0 +1,137 @@
+name: publish image
+
+# Publishes to this repository's own GitHub Container Registry namespace, which
+# needs no secret to set up: GITHUB_TOKEN is enough. A fork publishes to its own
+# namespace or, if packages are disabled there, fails at the login step and
+# nothing else.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  schedule:
+    # The base image is pinned by digest, but "apk upgrade" in the runtime stage
+    # pulls whatever Alpine has patched since. A rebuild is what actually ships
+    # those fixes to anyone running :latest.
+    - cron: '0 5 * * 1'
+  workflow_dispatch:
+
+permissions: read-all
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # Attach the signed SBOM to a release
+      packages: write   # Push to GHCR
+      id-token: write   # Keyless signing through Sigstore
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Work out the version and build date
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(git rev-parse --short HEAD)"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130  # v3.7.0  # for the linux/arm64 build
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0  # container driver, so attestations work
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Collect tags and labels
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051  # v5.10.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ steps.version.outputs.date }}
+          # The image carries an SBOM file of its own; these are the
+          # registry-side attestations, which only a container driver produces.
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5  # v3.10.1
+
+      - name: Sign the image
+        # Keyless: the signature is bound to this workflow's OIDC identity, so
+        # there is no private key to store or rotate. Verify with:
+        #   cosign verify <image>@<digest> \
+        #     --certificate-identity-regexp '^https://github.com/.+/.github/workflows/publish-image.yml@.+' \
+        #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+
+      - name: Attach a signed SBOM to the release
+        # Only for a tag: the release gets the inventory of what was published,
+        # and a Sigstore bundle so it can be verified without trusting this
+        # repository.
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          docker run --rm --entrypoint cat "${IMAGE}@${DIGEST}" \
+            /usr/share/mqttview/sbom.cdx.json > "mqttview-${TAG}.sbom.cdx.json"
+          cosign sign-blob --yes \
+            --bundle "mqttview-${TAG}.sbom.cdx.json.sigstore.json" \
+            "mqttview-${TAG}.sbom.cdx.json"
+          gh release upload "${TAG}" \
+            "mqttview-${TAG}.sbom.cdx.json" \
+            "mqttview-${TAG}.sbom.cdx.json.sigstore.json" \
+            --clobber
+
+      - name: Scan what was published
+        uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297  # master
+        env:
+          TRIVY_VEX: security/mqttview.openvex.json
+        with:
+          image-ref: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table

@@ -1,0 +1,77 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommitsDisabled"
+  ],
+  "timezone": "Europe/Ljubljana",
+  "schedule": ["* 4-7 * * 1"],
+  "prConcurrentLimit": 5,
+  "labels": ["dependencies"],
+  "commitMessagePrefix": "Update",
+  "commitMessageAction": "",
+  "commitMessageTopic": "{{depName}}",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["* 4-7 * * 1"]
+  },
+  "packageRules": [
+    {
+      "description": "GitHub Actions are pinned by commit SHA; keep the SHA and the version comment in step",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions",
+      "pinDigests": true
+    },
+    {
+      "description": "Base images are pinned by digest on purpose",
+      "matchManagers": ["dockerfile", "custom.regex"],
+      "pinDigests": true
+    },
+    {
+      "description": "Frontend tooling moves together and rarely needs reading one by one",
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["devDependencies"],
+      "groupName": "frontend tooling"
+    },
+    {
+      "description": "The Go toolchain in go.mod is a floor, not a pin: raising it drops users of older toolchains",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["golang"],
+      "enabled": false
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "syft, pinned by digest in an ARG the dockerfile manager does not resolve (FROM --platform)",
+      "customType": "regex",
+      "managerFilePatterns": ["/^Dockerfile$/"],
+      "matchStrings": [
+        "ARG SYFT_IMAGE=(?<depName>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]+)"
+      ],
+      "datasourceTemplate": "docker",
+      "currentValueTemplate": "latest"
+    },
+    {
+      "description": "govulncheck, run with 'go run' from the CI workflow rather than being a dependency",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.yml$/"],
+      "matchStrings": [
+        "golang\\.org/x/vuln/cmd/govulncheck@(?<currentValue>v[\\d.]+)"
+      ],
+      "datasourceTemplate": "go",
+      "depNameTemplate": "golang.org/x/vuln"
+    },
+    {
+      "description": "golangci-lint, whose version the action installs rather than reading from a file",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/"],
+      "matchStrings": [
+        "golangci-lint-action@[a-f0-9]+\\s+#[^\\n]*\\n\\s+with:\\n\\s+version: (?<currentValue>v[\\d.]+)"
+      ],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "golangci/golangci-lint",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    }
+  ]
+}

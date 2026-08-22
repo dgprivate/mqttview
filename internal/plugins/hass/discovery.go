@@ -2,7 +2,6 @@ package hass
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -36,6 +35,18 @@ func parseDiscoveryTopic(prefix, topic string) (discoveryTopic, bool) {
 	// <component>/<object_id>/config or <component>/<node_id>/<object_id>/config
 	if len(parts) < 3 || len(parts) > 4 || parts[len(parts)-1] != "config" {
 		return discoveryTopic{}, false
+	}
+
+	// An empty segment is rejected rather than accepted and normalised away.
+	// topicOf() omits an empty node ID, so "<prefix>/x//y/config" would rebuild
+	// as "<prefix>/x/y/config" — and since that string is the entity's identity
+	// key, two different discovery topics would land on one entry, each
+	// overwriting and deleting the other. Home Assistant does not allow empty
+	// IDs either.
+	for _, p := range parts[:len(parts)-1] {
+		if p == "" {
+			return discoveryTopic{}, false
+		}
 	}
 
 	dt := discoveryTopic{Prefix: prefix, Component: parts[0]}
@@ -294,10 +305,6 @@ type availabilitySpec struct {
 	Online   string `json:"online"`
 	Offline  string `json:"offline"`
 }
-
-// errEmptyConfig signals a discovery message with an empty payload, which is
-// Home Assistant's way of deleting an entity.
-var errEmptyConfig = errors.New("hass: empty discovery payload")
 
 func trimFloat(f float64) string {
 	s := fmt.Sprintf("%g", f)

@@ -10,6 +10,11 @@ data/
 *.db-shm
 secret.key
 mqttview.yaml
+# The compose environment file: it holds the encryption key and the bootstrap
+# password. It never reaches the final image, but it has no business being in
+# a builder layer either.
+.env
+!.env.example
 
 # Build output — the image builds its own.
 mqttview

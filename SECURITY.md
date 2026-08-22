@@ -56,6 +56,45 @@ Think of an mqttview instance as being as sensitive as the brokers it can reach:
   self-signed home brokers; do not use it against anything crossing a network
   you do not control.
 
+## What the project does about supply chain and the container
+
+[`security/README.md`](security/README.md) is the detailed version: which CIS
+Docker Benchmark controls the container satisfies and the command that verifies
+each one, how a finding that cannot be fixed and does not apply is recorded as
+an OpenVEX statement, and — just as important — what is deliberately **not**
+claimed.
+
+In short:
+
+* the image runs unprivileged with no capabilities, a read-only root
+  filesystem, no package manager and no setuid binaries
+* it carries a CycloneDX SBOM of itself; published images also carry registry
+  SBOM and provenance attestations and a keyless Sigstore signature
+* every base image and every GitHub Action is pinned by digest or commit SHA,
+  Renovate moves those pins, and the image is rebuilt weekly so that base
+  patches actually ship
+* CI fails on a fixable HIGH or CRITICAL finding, and runs CodeQL, govulncheck,
+  `npm audit` and OpenSSF Scorecard
+* each tagged release carries its SBOM as an asset with a Sigstore bundle
+  beside it:
+
+```bash
+cosign verify-blob --bundle mqttview-v0.1.0.sbom.cdx.json.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/.+/.github/workflows/publish-image.yml@.+' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  mqttview-v0.1.0.sbom.cdx.json
+```
+
+Verify a published image the same way:
+
+```bash
+cosign verify ghcr.io/dgprivate/mqttview@sha256:... \
+  --certificate-identity-regexp '^https://github.com/.+/.github/workflows/publish-image.yml@.+' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
 ## Supported versions
 
-Until 1.0, only the latest release gets fixes.
+Until 1.0, only the latest release gets fixes. `latest` and the current tag get
+the weekly rebuild; older tags stay published for reproducibility but are not
+patched.

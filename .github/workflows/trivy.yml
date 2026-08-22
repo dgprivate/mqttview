@@ -1,0 +1,87 @@
+name: trivy
+
+# Scans the image that this repository would build today. The base image is
+# pinned by digest, so what changes between runs is the vulnerability database,
+# not the image — which is exactly why this is scheduled and not only run on a
+# push.
+#
+# Fails on a HIGH or CRITICAL finding that has a fix available. Findings with no
+# fix are reported but do not fail: there is nothing to do about them today, and
+# a build that is always red is a build nobody reads. Ones that have a fix
+# upstream but genuinely do not apply here go in the VEX document instead, with
+# the reasoning written down.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - 'go.mod'
+      - 'go.sum'
+      - 'web/package-lock.json'
+      - 'security/**'
+      - '.github/workflows/trivy.yml'
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write  # Upload SARIF to the Security tab
+      contents: read
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
+
+      - name: Build the image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
+        with:
+          context: .
+          push: false
+          load: true
+          tags: mqttview:scan
+          build-args: |
+            VERSION=scan
+            VCS_REF=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Reported to the Security tab whatever the severity, so the history is
+      # there even for what the gate below lets past.
+      - name: Scan for the record
+        uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297  # master
+        env:
+          TRIVY_VEX: security/mqttview.openvex.json
+        with:
+          image-ref: mqttview:scan
+          scanners: vuln
+          format: sarif
+          output: trivy.sarif
+
+      - name: Upload to the Security tab
+        uses: github/codeql-action/upload-sarif@42947a340483f03ba47bb1a039b2c519aab3df85  # v3.37.8
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
+
+      - name: Fail on a fixable HIGH or CRITICAL
+        uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297  # master
+        env:
+          # Findings we have analysed and ruled out — see security/README.md
+          TRIVY_VEX: security/mqttview.openvex.json
+        with:
+          image-ref: mqttview:scan
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true  # Report what can actually be acted on
+          exit-code: '1'
+          format: table

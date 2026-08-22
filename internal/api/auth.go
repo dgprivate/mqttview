@@ -47,7 +47,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	u, err := s.auth.Login(r.Context(), req.Email, req.Password, r.RemoteAddr)
+	u, err := s.auth.Login(r.Context(), req.Email, req.Password, s.auth.ClientIP(r))
 	if err != nil {
 		switch {
 		case errors.Is(err, auth.ErrLocalLoginDisabled):

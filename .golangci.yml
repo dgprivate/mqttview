@@ -1,0 +1,73 @@
+version: "2"
+
+# What CI enforces, so it can be run locally with the same result:
+#
+#   golangci-lint run
+#
+# The set is deliberately small, and every exclusion below names why the linter
+# is wrong about this code rather than switching it off for quiet. A linter that
+# fires on style nobody agreed to gets silenced with nolint comments, and then
+# the ones that matter get silenced with it.
+
+linters:
+  default: standard  # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    # A leaked response body is a leaked connection, and this server holds many.
+    - bodyclose
+    # A shadowed or unwrapped err is a bug that reads like working code.
+    - errorlint
+    # This project talks to networks and disks; a swallowed error is a defect.
+    - nilerr
+    # SQL, crypto, TLS and file paths all live in here somewhere.
+    - gosec
+    - copyloopvar
+    - prealloc
+
+  settings:
+    gosec:
+      excludes:
+        # G115 integer conversion: the two sites are bounded before the cast —
+        # KeepAlive is validated against 65535 in ConnectionSpec.Normalize, and
+        # the argon2 length is a hash size this code chose itself.
+        - G115
+        # G304 file inclusion by variable: reading the config file and the
+        # encryption key from operator-supplied paths is the point of those
+        # settings. There is no untrusted input in either path.
+        - G304
+        # G402 InsecureSkipVerify: opt-in per connection, marked in the UI and
+        # documented in SECURITY.md. Home brokers with self-signed certificates
+        # are the reason it exists.
+        - G402
+        # G710 open redirect: the SSO "next" parameter goes through
+        # sanitizeNext, which rejects anything not beginning with a single "/".
+        # The taint analysis cannot see through the signed-state round trip.
+        - G710
+        # G124 cookie attributes: the session cookie sets HttpOnly, SameSite
+        # and Secure (from base_url); the CSRF cookie is readable by script on
+        # purpose, because double-submit requires the SPA to echo it back.
+        - G124
+        # G118 background context in a goroutine: the reconnect supervisor and
+        # the autopaho connection manager have to outlive the request that
+        # started them, which is the documented reason they take their own.
+        - G118
+    staticcheck:
+      checks: ["all"]
+
+  exclusions:
+    rules:
+      # Tests set up adversarial conditions on purpose, and a response body in
+      # a test dies with the test.
+      - path: _test\.go
+        linters: [gosec, errcheck, bodyclose, prealloc]
+      # A deferred Close on a read path has nothing to report and nowhere to
+      # report it; the write paths check theirs.
+      - source: 'defer .*\.Close\(\)'
+        linters: [errcheck]
+
+formatters:
+  enable:
+    - gofmt
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

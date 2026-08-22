@@ -74,7 +74,11 @@ func New(o Options) *Server {
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	// Deliberately not middleware.RealIP: it rewrites RemoteAddr from headers
+	// any client can send, whether or not a proxy actually sets them, and the
+	// rewritten value is what the sign-in rate limit is keyed on. Forwarded
+	// headers are consulted only when the operator has said a proxy is in
+	// front — see auth.Service.ClientIP and config.TrustProxyHeaders.
 	r.Use(s.requestLogger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))

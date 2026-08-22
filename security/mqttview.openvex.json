@@ -1,0 +1,10 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/dgprivate/mqttview/security/mqttview.openvex.json",
+  "author": "mqttview maintainers",
+  "role": "Project maintainer",
+  "timestamp": "2026-08-22T00:00:00Z",
+  "version": 1,
+  "tooling": "hand-written; see security/README.md for how a statement gets added",
+  "statements": []
+}

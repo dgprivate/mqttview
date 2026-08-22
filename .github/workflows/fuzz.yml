@@ -1,0 +1,110 @@
+name: fuzz
+
+# Coverage-guided fuzzing of the parsers that read input mqttview does not
+# control: topics and filters chosen by whoever can publish to a broker,
+# discovery payloads written by other people's firmware, and the PLC plugin's
+# command validator — the one place a plugin can act on a house.
+#
+# A pull request gets a short run per target, enough to replay the accumulated
+# corpus and catch a regression while the change is being reviewed. The weekly
+# run is the one that explores: it starts from the cached corpus, so coverage
+# keeps growing from week to week instead of restarting from nothing.
+#
+# Anything the fuzzer finds is written to testdata/fuzz/ by `go test` and
+# becomes an ordinary regression test on the next run, so a fix is proven by
+# the same input that broke it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'internal/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/fuzz.yml'
+  schedule:
+    - cron: '40 3 * * 2'
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: 'Seconds to fuzz each target'
+        required: false
+        default: '600'
+
+permissions: read-all
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: ./internal/mqttc
+            target: FuzzValidateFilter
+          - package: ./internal/mqttc
+            target: FuzzMatchFilter
+          - package: ./internal/mqttc
+            target: FuzzTreeRecord
+          - package: ./internal/plugins/hass
+            target: FuzzParseConfig
+          - package: ./internal/plugins/hass
+            target: FuzzParseDiscoveryTopic
+          - package: ./internal/plugins/hass
+            target: FuzzRenderTemplate
+          - package: ./internal/plugins/plc
+            target: FuzzRegistryApply
+          - package: ./internal/plugins/plc
+            target: FuzzBuildCommand
+          - package: ./internal/plugins/plc
+            target: FuzzMappingKey
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # go stores generated corpus entries here, outside the repository. Keeping
+      # it between runs is what makes the weekly job cumulative.
+      - name: Restore the corpus
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: ~/.cache/go-build/fuzz
+          key: fuzz-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-${{ matrix.target }}-
+
+      - name: Work out how long to run
+        id: budget
+        run: |
+          if [ -n "${{ inputs.seconds }}" ]; then
+            echo "seconds=${{ inputs.seconds }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "seconds=600" >> "$GITHUB_OUTPUT"
+          else
+            echo "seconds=60" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fuzz ${{ matrix.target }}
+        run: |
+          go test ${{ matrix.package }} \
+            -run '^${{ matrix.target }}$' \
+            -fuzz '^${{ matrix.target }}$' \
+            -fuzztime=${{ steps.budget.outputs.seconds }}s
+
+      # A failure writes the input to testdata/fuzz/. Keeping it means the
+      # crasher can be committed as a regression test rather than reproduced by
+      # hand from a log.
+      - name: Keep any failing input
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: fuzz-crasher-${{ matrix.target }}
+          path: '**/testdata/fuzz/**'
+          retention-days: 30

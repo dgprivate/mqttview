@@ -14,6 +14,11 @@ services:
       context: .
       args:
         VERSION: ${MQTTVIEW_VERSION:-compose}
+        # Recorded as OCI labels, so a running container can be traced back to
+        # the commit it was built from:
+        #   VCS_REF=$(git rev-parse --short HEAD) docker compose build
+        VCS_REF: ${VCS_REF:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
     image: mqttview:${MQTTVIEW_VERSION:-latest}
     container_name: mqttview
     restart: unless-stopped
@@ -42,15 +47,41 @@ services:
       # Optional: drop a mqttview.yaml next to this file to configure SSO.
       # - ./mqttview.yaml:/data/mqttview.yaml:ro
 
+    # --- Least privilege -------------------------------------------------
+    # The unprivileged account is baked into the image; naming it here as well
+    # means a compose file that outlives the image cannot silently run as root.
+    user: "10001:10001"
+    # The process binds a port above 1024, reads a volume and opens outbound
+    # TCP. None of that needs a capability.
+    cap_drop:
+      - ALL
+    # Block a setuid binary from raising privileges inside the container.
+    security_opt:
+      - no-new-privileges:true
     # Everything the process needs is in the volume; the rest can stay locked.
     read_only: true
     tmpfs:
-      - /tmp
-    security_opt:
-      - no-new-privileges:true
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    # PID 1 reaper, so SIGTERM reaches the server and zombies get collected.
+    init: true
 
+    # --- Denial-of-service containment ------------------------------------
+    # A broker that floods a topic tree should degrade this container, not the
+    # host it shares with everything else.
+    pids_limit: 256
+    mem_limit: 512m
+    cpus: 1.5
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Runs the server binary rather than wget, so the image needs no shell
+    # utilities for a container to report whether it is up.
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8114/api/health"]
+      test: ["CMD", "mqttview", "-health-check"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -69,6 +100,11 @@ services:
       - mosquitto-a-data:/mosquitto/data
     ports:
       - "127.0.0.1:1883:1883"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    init: true
+    pids_limit: 128
+    mem_limit: 256m
 
   mosquitto-b:
     profiles: ["demo"]
@@ -80,6 +116,11 @@ services:
       - mosquitto-b-data:/mosquitto/data
     ports:
       - "127.0.0.1:1884:1883"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    init: true
+    pids_limit: 128
+    mem_limit: 256m
 
 volumes:
   mqttview-data:
