@@ -577,3 +577,80 @@ func TestAnExistingAdminMeansNobodyIsPromoted(t *testing.T) {
 		t.Errorf("role = %q, want the configured default", u.Role)
 	}
 }
+
+func TestTheCSRFCookieWorksAtEveryAddressTheInstallHas(t *testing.T) {
+	// A Home Assistant is commonly reached two ways: a .local name inside the
+	// house over plain HTTP, and a proxied name outside over HTTPS. Both have
+	// to work, and they have to work with one cookie — a Secure cookie set
+	// over HTTPS cannot be replaced from an HTTP page, so a scheme-dependent
+	// flag makes the panel refuse writes at whichever address was second.
+	s, _ := newIngressService(t)
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	for _, proto := range []string{"http", "https", ""} {
+		r := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+		if proto != "" {
+			r.Header.Set("X-Forwarded-Proto", proto)
+		}
+
+		w := httptest.NewRecorder()
+		s.IngressCSRF(next).ServeHTTP(w, r)
+
+		var got *http.Cookie
+		for _, c := range w.Result().Cookies() {
+			if c.Name == CSRFCookie {
+				got = c
+			}
+		}
+		if got == nil {
+			t.Fatalf("proto %q: no CSRF cookie was issued", proto)
+		}
+		if got.Secure {
+			t.Errorf("proto %q: the cookie is Secure, so it will not survive "+
+				"the same install being reached over plain HTTP", proto)
+		}
+		// Lax rather than None: the panel is an iframe, but on Home
+		// Assistant's own origin, so it is not cross-site.
+		if got.SameSite != http.SameSiteLaxMode {
+			t.Errorf("proto %q: SameSite = %v", proto, got.SameSite)
+		}
+	}
+}
+
+func TestAWriteWorksWithTheCookieIssuedOverEitherScheme(t *testing.T) {
+	s, _ := newIngressService(t)
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// Issued while browsing over HTTPS...
+	read := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	read.Header.Set("X-Forwarded-Proto", "https")
+	w := httptest.NewRecorder()
+	s.IngressCSRF(next).ServeHTTP(w, read)
+
+	var token string
+	for _, c := range w.Result().Cookies() {
+		if c.Name == CSRFCookie {
+			token = c.Value
+		}
+	}
+	if token == "" {
+		t.Fatal("no token was issued")
+	}
+
+	// ...and used while browsing over plain HTTP, which is the same person on
+	// the same install at its other address.
+	write := httptest.NewRequest(http.MethodPost, "/api/connections", nil)
+	write.Header.Set("X-Forwarded-Proto", "http")
+	write.AddCookie(&http.Cookie{Name: CSRFCookie, Value: token})
+	write.Header.Set(CSRFHeader, token)
+
+	w = httptest.NewRecorder()
+	s.IngressCSRF(next).ServeHTTP(w, write)
+	if w.Code != http.StatusOK {
+		t.Fatalf("a write with a token issued over HTTPS gave %d over HTTP", w.Code)
+	}
+}

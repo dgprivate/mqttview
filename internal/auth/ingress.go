@@ -302,7 +302,7 @@ func (s *Service) IngressCSRF(next http.Handler) http.Handler {
 		switch r.Method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
 			if _, err := r.Cookie(CSRFCookie); err != nil {
-				s.setIngressCSRFCookie(w, r)
+				s.setIngressCSRFCookie(w)
 			}
 			next.ServeHTTP(w, r)
 			return
@@ -313,22 +313,30 @@ func (s *Service) IngressCSRF(next http.Handler) http.Handler {
 
 // setIngressCSRFCookie issues the token the frontend echoes back.
 //
-// SameSite=Lax, and Secure only when the browser actually reached Home
-// Assistant over HTTPS.
+// Deliberately not Secure, and this is the interesting part.
 //
-// The first version of this set SameSite=None and Secure unconditionally,
-// reasoning that the panel is an iframe and therefore cross-site. It is an
-// iframe, but not a cross-site one: ingress serves it from Home Assistant's own
-// origin, so Lax is sent exactly as it would be for a top-level page. The
-// unconditional Secure was the expensive half — a browser will not store a
-// Secure cookie delivered over plain HTTP, so on an install reached at
-// http://homeassistant.local:8123 the cookie never existed, the page had
-// nothing to echo, and every write came back "CSRF token missing or invalid".
+// The first version set Secure unconditionally, reasoning that the panel is an
+// iframe and so cross-site. It is an iframe but a same-origin one — ingress
+// serves it from Home Assistant's own origin — and the Secure flag meant that
+// on an install reached at http://homeassistant.local:8123 the browser stored
+// nothing, the page had nothing to echo, and every write came back "CSRF token
+// missing or invalid".
 //
-// The scheme comes from X-Forwarded-Proto, which is a header and so is worth
-// only as much as the hop that set it — here that hop is the Supervisor, and
-// checkIngressSource has already proved the request came from it.
-func (s *Service) setIngressCSRFCookie(w http.ResponseWriter, r *http.Request) {
+// The second version set Secure from X-Forwarded-Proto, which fixes the
+// plain-HTTP install and breaks the one reached both ways: a Secure cookie set
+// over HTTPS cannot be overwritten from an HTTP page ("Leave Secure Cookies
+// Alone"), so the same panel works at one address and refuses writes at the
+// other. Home Assistant installs commonly have both — a .local name inside the
+// house and a proxied name outside.
+//
+// So: no Secure flag, and one cookie that works at every address. What that
+// costs is worth weighing rather than waving away, and it comes out small.
+// This is not a credential: it is one half of a double-submit pair whose only
+// job is to prove the request came from a page that could read same-origin
+// state. Reaching the endpoint at all requires Home Assistant's own session,
+// which is a real credential and is not this — and anybody positioned to read
+// the token off plain HTTP can already inject script into the page holding it.
+func (s *Service) setIngressCSRFCookie(w http.ResponseWriter) {
 	token, err := randomToken(32)
 	if err != nil {
 		s.log.Error("generating a CSRF token failed", "error", err)
@@ -340,7 +348,7 @@ func (s *Service) setIngressCSRFCookie(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   int((24 * time.Hour).Seconds()),
 		HttpOnly: false, // read by the SPA and echoed in CSRFHeader
-		Secure:   strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https"),
+		Secure:   false, // see above: the same install is reached over both
 		SameSite: http.SameSiteLaxMode,
 	})
 }

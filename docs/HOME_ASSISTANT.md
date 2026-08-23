@@ -92,6 +92,19 @@ that can only be a path — no other origin, no quotes, no control characters.
 Outside ingress mode it is ignored entirely, because outside ingress mode
 nothing has checked who set it.
 
+### HTTP and HTTPS both
+
+A Home Assistant is commonly reached two ways: a `.local` name inside the house
+over plain HTTP, and a proxied name outside over HTTPS. The panel works at
+both, from one install, without configuration.
+
+That is worth stating because it took two attempts. The CSRF cookie is not
+marked `Secure`: a Secure cookie set over HTTPS cannot be replaced from an HTTP
+page, so a scheme-dependent flag makes the panel refuse writes at whichever
+address you visited second. The cookie is not a credential — reaching the
+endpoint at all needs Home Assistant's own session — and `internal/auth/ingress.go`
+carries the full reasoning.
+
 ### The broker you already have
 
 Home Assistant knows where your MQTT broker is if the MQTT integration is set
