@@ -76,16 +76,34 @@ func TestOpenRejectsTamperedCiphertext(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Flip a character. GCM authenticates, so this must fail rather than
-	// return something that merely looks wrong.
-	flipped := []byte(sealed)
-	if flipped[len(flipped)-2] == 'A' {
-		flipped[len(flipped)-2] = 'B'
-	} else {
-		flipped[len(flipped)-2] = 'A'
+	// Tamper with the decoded bytes, not with the base64 text.
+	//
+	// Flipping a base64 character near the end can leave the decoded bytes
+	// identical: the final characters carry bits that do not complete a byte
+	// and are discarded. GCM then authenticates successfully, correctly, and
+	// the test fails claiming tampering was accepted — which is what this test
+	// used to do, roughly one run in ten, and only on the machine you were not
+	// looking at.
+	raw, err := base64.StdEncoding.DecodeString(sealed)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := box.Open(string(flipped)); err == nil {
+	// A byte in the middle of the ciphertext: past the nonce, before the tag,
+	// so it is the message itself that changed.
+	raw[len(raw)/2] ^= 0xff
+	tampered := base64.StdEncoding.EncodeToString(raw)
+	if tampered == sealed {
+		t.Fatal("the tampering did not change anything")
+	}
+	if _, err := box.Open(tampered); err == nil {
 		t.Fatal("a tampered ciphertext was accepted")
+	}
+
+	// And the tag itself, which is what actually detects the change above.
+	raw, _ = base64.StdEncoding.DecodeString(sealed)
+	raw[len(raw)-1] ^= 0xff
+	if _, err := box.Open(base64.StdEncoding.EncodeToString(raw)); err == nil {
+		t.Fatal("a ciphertext with a tampered authentication tag was accepted")
 	}
 
 	for _, bad := range []string{"not base64!", "AAAA", sealed[:len(sealed)/2]} {
