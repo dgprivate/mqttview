@@ -107,9 +107,15 @@ carries the full reasoning.
 
 ### The broker you already have
 
-Home Assistant knows where your MQTT broker is if the MQTT integration is set
-up, so the app asks the Supervisor for it and creates the connection on first
-start. Nobody copies a host, a port and a password into a second form.
+If your broker is the **Mosquitto app**, the app asks the Supervisor for it and
+creates the connection on first start — nobody copies a host, a port and a
+password into a second form.
+
+If it is not, set `mqtt_url` in the app's configuration and it is added the same
+way. That is not a shortcoming to work around: the Supervisor's service registry
+is written by apps that *provide* a broker, and the MQTT integration reads from
+it. A broker entered into the integration, or running elsewhere on the network,
+is invisible to an app by any route, so naming it once is the honest answer.
 
 It only ever adds. A connection you have since edited is left exactly as it is,
 because a configuration that reasserts itself on every restart is a setting

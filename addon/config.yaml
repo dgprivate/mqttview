@@ -9,7 +9,7 @@
 # that did not come through the Supervisor, so it would be a door to a refusal
 # page, but a port nobody needs is a port nobody should open.
 name: mqttview
-version: "0.1.7"
+version: "0.1.8"
 slug: mqttview
 description: A realtime web UI for MQTT brokers, with Home Assistant discovery and a Beckhoff PLC panel
 url: https://github.com/dgprivate/mqttview
@@ -49,13 +49,22 @@ startup: services
 map:
   - addon_config:rw
 
-# The Home Assistant MQTT integration's broker settings, so the add-on can
-# offer to connect to the same broker without anybody typing it twice.
+# The Home Assistant MQTT integration's broker settings, so the app can offer
+# to connect to the same broker without anybody typing it twice.
 services:
   - mqtt:want
 
+# Access to the Supervisor API, which is what actually causes SUPERVISOR_TOKEN
+# to be injected. Declaring `services` alone does not: the first install
+# reported "no Supervisor token" and skipped the import, correctly, because
+# there was nothing to authenticate with.
+hassio_api: true
+
 options:
   import_mqtt: true
+  mqtt_url: ""
+  mqtt_username: ""
+  mqtt_password: ""
   log_level: info
   default_role: operator
   admin_users: []
@@ -63,10 +72,17 @@ options:
   frame_ancestors: []
 
 schema:
-  # Create a connection to the broker Home Assistant already uses, on first
-  # start, if there is not one already. Only ever adds: a connection you have
-  # edited is left alone.
+  # Create a broker connection on first start if there is not one already.
+  # Only ever adds: a connection you have edited is left alone.
   import_mqtt: bool?
+  # A broker to add, for the common case that Home Assistant cannot tell an app
+  # about yours. The Supervisor only knows about brokers an app provides — the
+  # Mosquitto app, usually. One you entered into the MQTT integration, or one
+  # running elsewhere on your network, is not something it can share, so name it
+  # here instead: mqtt://host:1883, or mqtts:// for TLS.
+  mqtt_url: str?
+  mqtt_username: str?
+  mqtt_password: password?
   log_level: list(debug|info|warn|error)
   # What a Home Assistant user may do in mqttview on first sight. Home
   # Assistant does not tell an add-on whether somebody is one of its

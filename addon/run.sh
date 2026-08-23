@@ -33,52 +33,78 @@ option_list() {
 say() { echo "mqttview: $*" >&2; }
 
 mqtt_connection() {
-    if [ -z "${SUPERVISOR_TOKEN:-}" ]; then
-        say "no Supervisor token, so not asking about MQTT"
+    # An explicitly configured broker wins: somebody who typed it in means it,
+    # and the Supervisor cannot tell an app about a broker that no app
+    # provides — one entered into the MQTT integration, or running elsewhere on
+    # the network, is invisible from here no matter what is asked.
+    local url user pass
+    url="$(option mqtt_url)"
+    if [ -n "${url}" ]; then
+        user="$(option mqtt_username)"
+        pass="$(option mqtt_password)"
+        say "adding the broker from this app's configuration: ${url}"
+        # Named after the host rather than "Home Assistant": this one is not
+        # Home Assistant's, and a list of brokers wants to say which is which.
+        emit_connection "${url}" "${user}" "${pass}" "$(broker_name "${url}")"
         return 0
     fi
 
-    local service status
-    # -w writes the status after the body so both are available; -f is not used
-    # because a 400 body says more than a non-zero exit does.
-    service="$(curl -sS -w '\n%{http_code}' \
-        -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
-        http://supervisor/services/mqtt 2>/dev/null)" || {
-        say "could not reach the Supervisor to ask about MQTT"
-        return 0
-    }
-    status="$(echo "${service}" | tail -1)"
-    service="$(echo "${service}" | sed '$d')"
+    # bashio first: it is the Supervisor's own client, it knows where the token
+    # lives and what the service API looks like, and it will keep knowing after
+    # the next rename. Home Assistant renamed HASSIO_TOKEN to SUPERVISOR_TOKEN
+    # once already, and add-ons to apps since.
+    if [ -r /usr/lib/bashio/bashio.sh ]; then
+        # shellcheck source=/dev/null
+        . /usr/lib/bashio/bashio.sh
 
-    if [ "${status}" != "200" ]; then
-        say "the Supervisor has no MQTT service to share (HTTP ${status})."
-        say "that is normal when the broker is configured directly in the MQTT"
-        say "integration rather than provided by an add-on — add it in mqttview."
+        if ! bashio::services.available mqtt; then
+            say "Home Assistant has no MQTT service to share."
+            say "the Supervisor only knows about brokers an app provides, so a"
+            say "broker you entered into the MQTT integration is invisible here."
+            say "set mqtt_url in this app's configuration, or add it in mqttview"
+            say "once — either way it is stored and stays."
+            return 0
+        fi
+
+        local host port user pass ssl scheme
+        host="$(bashio::services mqtt 'host')"
+        port="$(bashio::services mqtt 'port')"
+        user="$(bashio::services mqtt 'username')"
+        pass="$(bashio::services mqtt 'password')"
+        ssl="$(bashio::services mqtt 'ssl')"
+
+        if [ -z "${host}" ] || [ "${host}" = "null" ]; then
+            say "the MQTT service named no host; skipping the import"
+            return 0
+        fi
+
+        scheme="mqtt"
+        [ "${ssl}" = "true" ] && scheme="mqtts"
+
+        say "importing the broker Home Assistant uses: ${scheme}://${host}:${port}"
+        emit_connection "${scheme}://${host}:${port}" "${user}" "${pass}"
         return 0
     fi
 
-    local host port user pass ssl scheme
-    host="$(echo "${service}" | jq -r '.data.host // empty')"
-    if [ -z "${host}" ]; then
-        say "the Supervisor answered about MQTT but named no host; skipping"
-        return 0
-    fi
-    port="$(echo "${service}" | jq -r '.data.port // 1883')"
-    user="$(echo "${service}" | jq -r '.data.username // empty')"
-    pass="$(echo "${service}" | jq -r '.data.password // empty')"
-    ssl="$(echo "${service}" | jq -r '.data.ssl // false')"
+    say "bashio is missing, so not asking about MQTT"
+}
 
-    scheme="mqtt"
-    [ "${ssl}" = "true" ] && scheme="mqtts"
+# broker_name is the host out of a URL, which is what a person calls a broker.
+broker_name() {
+    echo "$1" | sed -E 's|^[a-z]+://||; s|/.*$||; s|:[0-9]+$||'
+}
 
-    say "importing the broker Home Assistant uses: ${scheme}://${host}:${port}"
-
+# emit_connection writes the connections block mqttview seeds from. The name is
+# what seeding matches on, so it has to be stable: change it and a restart adds
+# a second connection beside the first.
+emit_connection() {
+    local url="$1" user="$2" pass="$3" name="${4:-Home Assistant}"
     echo ""
     echo "connections:"
-    echo "  - name: Home Assistant"
-    echo "    url: ${scheme}://${host}:${port}"
-    [ -n "${user}" ] && echo "    username: ${user}"
-    [ -n "${pass}" ] && echo "    password: ${pass}"
+    echo "  - name: ${name}"
+    echo "    url: ${url}"
+    [ -n "${user}" ] && [ "${user}" != "null" ] && echo "    username: ${user}"
+    [ -n "${pass}" ] && [ "${pass}" != "null" ] && echo "    password: ${pass}"
     echo "    subscribe:"
     echo "      - \"#\""
 }

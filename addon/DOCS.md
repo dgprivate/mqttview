@@ -96,18 +96,33 @@ Broker credentials are encrypted with a key generated on first start and kept
 beside the database. A backup contains both, which is what makes a restore
 work — treat the backup accordingly.
 
+### `mqtt_url`, `mqtt_username`, `mqtt_password`
+
+A broker to add on first start.
+
+```yaml
+mqtt_url: mqtt://mqtt.example.com:1883
+mqtt_username: someone
+mqtt_password: a-password
+```
+
+`mqtts://` for TLS. The connection is named after the host and subscribes to
+`#`, and you can change all of it in mqttview afterwards — this only ever adds
+a connection that is not there, and never touches one you have edited.
+
 ### `import_mqtt`
 
-On by default. The app asks the Supervisor for the broker Home Assistant is
-already using and creates that connection on first start.
+On by default. Asks Home Assistant for the broker it already uses, when
+`mqtt_url` is not set.
 
-It works when the broker is **provided by an add-on** — the Mosquitto add-on,
-usually — because that is what the Supervisor knows about. A broker configured
-directly in the MQTT integration, or one running elsewhere on your network, is
-not something the Supervisor can tell anybody about, so nothing is imported and
-the log says so. Add it in mqttview once; it is stored and stays.
+This works when the broker is **provided by an app** — the Mosquitto app,
+usually — because that is the only kind the Supervisor knows about. The
+Supervisor's service registry is filled in by apps that offer a broker; the
+MQTT integration reads from it rather than writing to it. So a broker you
+entered into the MQTT integration yourself, or one running elsewhere on your
+network, cannot be discovered from here by any means. Use `mqtt_url` for those.
 
-Whatever happens is in the add-on log, including the reason it did nothing.
+Whatever happens is in the app log, including the reason it did nothing.
 
 ## The MQTT broker
 
