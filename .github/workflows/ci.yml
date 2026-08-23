@@ -52,19 +52,22 @@ jobs:
       # later. Raise it when the number rises; never lower it to make a build
       # pass.
       #
-      # 88, while a developer machine measures 90.6 on the same commit. The
-      # difference is the runner, not the code: 127 of 550 functions cover
-      # slightly less here, led by argonParallelism (reads runtime.NumCPU) and
-      # the ticker-driven loops in hub and plugin. Some of that is irreducible;
-      # some is tests that pass without exercising what they claim, and those
-      # are worth fixing. Raise this back to 90 once they are.
+      # 88.5, while a developer machine measures 90.9 on the same commit. The
+      # difference is the runner, not the code: functions that read
+      # runtime.NumCPU or wait on a ticker cover slightly less on a smaller,
+      # slower box. The tests that were merely sleeping and hoping have been
+      # fixed — that closed some of the gap and turned up two real defects —
+      # and what is left is mostly irreducible.
+      #
+      # The floor sits a little under what CI actually measures, so a normal
+      # run has room and a deleted test still fails the build.
       - name: Coverage
         run: |
           go test -coverpkg=./internal/...,./cmd/... -coverprofile=coverage.out ./...
           go tool cover -func=coverage.out | tail -1
 
           total=$(go tool cover -func=coverage.out | tail -1 | grep -oE '[0-9]+\.[0-9]+')
-          floor=88.0
+          floor=88.5
           echo "total ${total}%, floor ${floor}%"
           awk -v t="$total" -v f="$floor" 'BEGIN { if (t+0 < f+0) { print "coverage fell below the floor"; exit 1 } }'
 
