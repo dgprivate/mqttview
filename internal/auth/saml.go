@@ -26,8 +26,8 @@ import (
 
 	"github.com/crewjam/saml"
 
-	"github.com/mqttview/mqttview/internal/config"
-	"github.com/mqttview/mqttview/internal/store"
+	"github.com/dgprivate/mqttview/internal/config"
+	"github.com/dgprivate/mqttview/internal/store"
 )
 
 // SAML 2.0 support, alongside the OIDC in oidc.go.

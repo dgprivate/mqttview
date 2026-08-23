@@ -14,10 +14,10 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	josejwt "github.com/go-jose/go-jose/v4/jwt"
 
-	"github.com/mqttview/mqttview/internal/api"
-	"github.com/mqttview/mqttview/internal/config"
-	"github.com/mqttview/mqttview/internal/store"
-	"github.com/mqttview/mqttview/internal/testutil"
+	"github.com/dgprivate/mqttview/internal/api"
+	"github.com/dgprivate/mqttview/internal/config"
+	"github.com/dgprivate/mqttview/internal/store"
+	"github.com/dgprivate/mqttview/internal/testutil"
 )
 
 // connectedBroker starts an in-process broker, registers it and connects, then

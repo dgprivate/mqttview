@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mqttview/mqttview/internal/testutil"
+	"github.com/dgprivate/mqttview/internal/testutil"
 )
 
 // MQTT 5 carries properties alongside a payload, and mqttview's whole reason

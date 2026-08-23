@@ -16,18 +16,18 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/mqttview/mqttview/internal/api"
-	"github.com/mqttview/mqttview/internal/auth"
-	"github.com/mqttview/mqttview/internal/config"
-	"github.com/mqttview/mqttview/internal/hub"
-	"github.com/mqttview/mqttview/internal/mqttc"
-	"github.com/mqttview/mqttview/internal/plugin"
-	"github.com/mqttview/mqttview/internal/secrets"
-	"github.com/mqttview/mqttview/internal/store"
-	"github.com/mqttview/mqttview/internal/testutil"
+	"github.com/dgprivate/mqttview/internal/api"
+	"github.com/dgprivate/mqttview/internal/auth"
+	"github.com/dgprivate/mqttview/internal/config"
+	"github.com/dgprivate/mqttview/internal/hub"
+	"github.com/dgprivate/mqttview/internal/mqttc"
+	"github.com/dgprivate/mqttview/internal/plugin"
+	"github.com/dgprivate/mqttview/internal/secrets"
+	"github.com/dgprivate/mqttview/internal/store"
+	"github.com/dgprivate/mqttview/internal/testutil"
 
 	// Register the bundled plugin so the end-to-end test covers it.
-	_ "github.com/mqttview/mqttview/internal/plugins/hass"
+	_ "github.com/dgprivate/mqttview/internal/plugins/hass"
 )
 
 const (

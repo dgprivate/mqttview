@@ -7,9 +7,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/mqttview/mqttview/internal/auth"
-	"github.com/mqttview/mqttview/internal/httpx"
-	"github.com/mqttview/mqttview/internal/store"
+	"github.com/dgprivate/mqttview/internal/auth"
+	"github.com/dgprivate/mqttview/internal/httpx"
+	"github.com/dgprivate/mqttview/internal/store"
 )
 
 func (s *Server) mountUsers(r chi.Router) {

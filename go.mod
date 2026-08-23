@@ -1,4 +1,4 @@
-module github.com/mqttview/mqttview
+module github.com/dgprivate/mqttview
 
 go 1.26.6
 

@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mqttview/mqttview/internal/mqttc"
+	"github.com/dgprivate/mqttview/internal/mqttc"
 )
 
 func TestCreateUserValidatesTheRole(t *testing.T) {

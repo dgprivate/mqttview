@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/mqttview/mqttview/internal/config"
+	"github.com/dgprivate/mqttview/internal/config"
 )
 
 func TestPasswordLoginCanBeSwitchedOff(t *testing.T) {

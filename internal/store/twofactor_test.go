@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mqttview/mqttview/internal/secrets"
+	"github.com/dgprivate/mqttview/internal/secrets"
 )
 
 func newTestStore(t *testing.T) *Store {

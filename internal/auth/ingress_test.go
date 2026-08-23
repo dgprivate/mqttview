@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mqttview/mqttview/internal/config"
-	"github.com/mqttview/mqttview/internal/secrets"
-	"github.com/mqttview/mqttview/internal/store"
+	"github.com/dgprivate/mqttview/internal/config"
+	"github.com/dgprivate/mqttview/internal/secrets"
+	"github.com/dgprivate/mqttview/internal/store"
 )
 
 // Home Assistant mode trades mqttview's own sign-in for the Supervisor's word.

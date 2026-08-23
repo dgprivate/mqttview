@@ -13,9 +13,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/mqttview/mqttview/internal/mqttc"
-	"github.com/mqttview/mqttview/internal/secrets"
-	"github.com/mqttview/mqttview/internal/store"
+	"github.com/dgprivate/mqttview/internal/mqttc"
+	"github.com/dgprivate/mqttview/internal/secrets"
+	"github.com/dgprivate/mqttview/internal/store"
 )
 
 // recorder is a plugin that remembers what the runtime did to it, which is the

@@ -4,7 +4,7 @@ Add this repository to Home Assistant to install mqttview as an add-on with a
 sidebar panel and no separate login:
 
 Settings → Add-ons → Add-on Store → ⋮ → Repositories →
-`https://github.com/mqttview/mqttview`
+`https://github.com/dgprivate/mqttview`
 
 The add-on manifest lives in `mqttview/`. See `mqttview/DOCS.md` for what the
 options do, and `docs/HOME_ASSISTANT.md` in the project root for how the mode

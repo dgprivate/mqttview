@@ -7,4 +7,4 @@ build_from:
   amd64: ghcr.io/home-assistant/amd64-base:3.21
   armv7: ghcr.io/home-assistant/armv7-base:3.21
 args:
-  MQTTVIEW_IMAGE: ghcr.io/mqttview/mqttview:latest
+  MQTTVIEW_IMAGE: hausbit/mqttview:latest

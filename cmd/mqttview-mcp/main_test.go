@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mqttview/mqttview/internal/plugins/plc"
+	"github.com/dgprivate/mqttview/internal/plugins/plc"
 )
 
 // fakeMqttview stands in for a running server: enough of the API for the MCP

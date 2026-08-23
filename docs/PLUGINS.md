@@ -122,7 +122,7 @@ func init() {
 Then add a blank import in `cmd/mqttview/main.go`:
 
 ```go
-_ "github.com/mqttview/mqttview/internal/plugins/acme"
+_ "github.com/dgprivate/mqttview/internal/plugins/acme"
 ```
 
 A fresh instance is built every time the plugin is enabled, so you do not need

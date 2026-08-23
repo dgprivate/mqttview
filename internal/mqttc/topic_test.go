@@ -3,7 +3,7 @@ package mqttc_test
 import (
 	"testing"
 
-	"github.com/mqttview/mqttview/internal/mqttc"
+	"github.com/dgprivate/mqttview/internal/mqttc"
 )
 
 func TestMatchFilter(t *testing.T) {

@@ -33,7 +33,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mqttview/mqttview/internal/plugins/plc"
+	"github.com/dgprivate/mqttview/internal/plugins/plc"
 )
 
 // version is the MCP server's own version, reported at initialize.

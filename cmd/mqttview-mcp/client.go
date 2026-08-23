@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mqttview/mqttview/internal/plugins/plc"
+	"github.com/dgprivate/mqttview/internal/plugins/plc"
 )
 
 // pluginPath is where the Beckhoff PLC plugin mounts its API.

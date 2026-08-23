@@ -32,9 +32,14 @@ the better experience by some distance.
 ## The add-on
 
 Settings → Add-ons → Add-on Store → ⋮ → Repositories → add
-`https://github.com/mqttview/mqttview`, then install **mqttview**.
+`https://github.com/dgprivate/mqttview`, then install **mqttview**.
 
 Options are documented in `addon/mqttview/DOCS.md`.
+
+The add-on builds itself on first install, which takes a minute: it pulls
+`hausbit/mqttview` and adds the entrypoint that turns Home Assistant's options
+into mqttview's configuration. There is no separate add-on image to keep in
+step with the binary, which is one fewer thing to get wrong.
 
 ### How the no-login part works, and what it rests on
 

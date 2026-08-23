@@ -187,7 +187,7 @@ open the panel, and asking for a second password would be one more credential
 to lose rather than one more lock.
 
 Settings → Add-ons → Add-on Store → ⋮ → Repositories → add
-`https://github.com/mqttview/mqttview`, then install **mqttview**.
+`https://github.com/dgprivate/mqttview`, then install **mqttview**.
 
 No port is published, and mqttview refuses any request that did not come
 through the Supervisor — that check is what makes the identity headers worth
@@ -205,7 +205,7 @@ your install, how the no-login mode works, and what it rests on.
 ## Quick start with Docker Compose
 
 ```bash
-git clone https://github.com/mqttview/mqttview.git
+git clone https://github.com/dgprivate/mqttview.git
 cd mqttview
 cp .env.example .env
 
@@ -237,13 +237,16 @@ is the volume holding the database and the encryption key.
 ### Plain Docker
 
 ```bash
-docker build -t mqttview .
 docker run -d -p 127.0.0.1:8114:8114 \
   -e MQTTVIEW_BASE_URL=http://127.0.0.1:8114 \
   -e MQTTVIEW_SECRET_KEY="$(openssl rand -hex 32)" \
   -v mqttview-data:/data \
-  mqttview
+  hausbit/mqttview
 ```
+
+The published image is multi-architecture and signed. `docker build -t mqttview .`
+builds the same thing from source if you would rather not trust a registry —
+which is the point of the SBOM and the signature below.
 
 ### From source
 

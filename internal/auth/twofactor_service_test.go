@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mqttview/mqttview/internal/config"
-	"github.com/mqttview/mqttview/internal/store"
+	"github.com/dgprivate/mqttview/internal/config"
+	"github.com/dgprivate/mqttview/internal/store"
 )
 
 // enrolled returns a user with two-factor turned on, plus the secret and the

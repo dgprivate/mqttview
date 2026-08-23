@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please report vulnerabilities privately through GitHub's
-[security advisory](https://github.com/mqttview/mqttview/security/advisories/new)
+[security advisory](https://github.com/dgprivate/mqttview/security/advisories/new)
 form rather than opening a public issue.
 
 Include what you can: the affected version, how to reproduce it, and what an

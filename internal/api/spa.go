@@ -9,7 +9,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/mqttview/mqttview/internal/auth"
+	"github.com/dgprivate/mqttview/internal/auth"
 )
 
 // baseTag is what index.html ships with, and what gets rewritten when the UI

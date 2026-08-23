@@ -6,7 +6,7 @@ opening a pull request.
 ## Getting set up
 
 ```bash
-git clone https://github.com/mqttview/mqttview.git
+git clone https://github.com/dgprivate/mqttview.git
 cd mqttview
 
 # Terminal 1 — the API

@@ -12,7 +12,7 @@ import (
 
 	_ "modernc.org/sqlite" // pure-Go driver: no cgo, so cross-compiling stays trivial
 
-	"github.com/mqttview/mqttview/internal/secrets"
+	"github.com/dgprivate/mqttview/internal/secrets"
 )
 
 // ErrNotFound is returned when a lookup matches no row.

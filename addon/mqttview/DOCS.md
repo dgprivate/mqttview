@@ -9,7 +9,7 @@ device view and a Beckhoff PLC panel from the bundled plugins.
 ## Installation
 
 1. Settings → Add-ons → Add-on Store → ⋮ → Repositories
-2. Add `https://github.com/mqttview/mqttview`
+2. Add `https://github.com/dgprivate/mqttview`
 3. Install **mqttview**, then Start.
 
 mqttview appears in the sidebar. There is no login: Home Assistant has already

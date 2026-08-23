@@ -16,8 +16,8 @@ import (
 
 	"github.com/crewjam/saml"
 
-	"github.com/mqttview/mqttview/internal/config"
-	"github.com/mqttview/mqttview/internal/secrets"
+	"github.com/dgprivate/mqttview/internal/config"
+	"github.com/dgprivate/mqttview/internal/secrets"
 )
 
 // attributeStatement builds the shape crewjam/saml hands back after it has

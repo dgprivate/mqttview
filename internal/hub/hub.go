@@ -14,7 +14,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/mqttview/mqttview/internal/mqttc"
+	"github.com/dgprivate/mqttview/internal/mqttc"
 )
 
 // Frame is the envelope for everything sent to a browser.

@@ -13,7 +13,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/mqttview/mqttview/internal/mqttc"
+	"github.com/dgprivate/mqttview/internal/mqttc"
 )
 
 func quietLog() *slog.Logger {

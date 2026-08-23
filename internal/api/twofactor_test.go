@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mqttview/mqttview/internal/auth"
+	"github.com/dgprivate/mqttview/internal/auth"
 )
 
 // currentCode produces what an authenticator app would show right now.

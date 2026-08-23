@@ -14,7 +14,7 @@
       },
       "products": [
         {
-          "@id": "pkg:golang/github.com/mqttview/mqttview"
+          "@id": "pkg:golang/github.com/dgprivate/mqttview"
         }
       ],
       "status": "not_affected",

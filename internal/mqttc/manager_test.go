@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mqttview/mqttview/internal/mqttc"
+	"github.com/dgprivate/mqttview/internal/mqttc"
 )
 
 // TestRoundTripEveryVersion is the load-bearing test for the client layer:

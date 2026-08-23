@@ -14,13 +14,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/mqttview/mqttview/internal/auth"
-	"github.com/mqttview/mqttview/internal/config"
-	"github.com/mqttview/mqttview/internal/httpx"
-	"github.com/mqttview/mqttview/internal/hub"
-	"github.com/mqttview/mqttview/internal/mqttc"
-	"github.com/mqttview/mqttview/internal/plugin"
-	"github.com/mqttview/mqttview/internal/store"
+	"github.com/dgprivate/mqttview/internal/auth"
+	"github.com/dgprivate/mqttview/internal/config"
+	"github.com/dgprivate/mqttview/internal/httpx"
+	"github.com/dgprivate/mqttview/internal/hub"
+	"github.com/dgprivate/mqttview/internal/mqttc"
+	"github.com/dgprivate/mqttview/internal/plugin"
+	"github.com/dgprivate/mqttview/internal/store"
 )
 
 // Server holds every dependency the handlers need.

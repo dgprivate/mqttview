@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mqttview/mqttview/internal/mqttc"
+	"github.com/dgprivate/mqttview/internal/mqttc"
 )
 
 // TestSeveralBrokersAtOnce is the multi-connection guarantee: one mqttview

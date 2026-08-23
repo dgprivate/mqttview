@@ -13,9 +13,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/mqttview/mqttview/internal/httpx"
-	"github.com/mqttview/mqttview/internal/mqttc"
-	"github.com/mqttview/mqttview/internal/store"
+	"github.com/dgprivate/mqttview/internal/httpx"
+	"github.com/dgprivate/mqttview/internal/mqttc"
+	"github.com/dgprivate/mqttview/internal/store"
 )
 
 // queueSize bounds how far behind a plugin may fall before messages are

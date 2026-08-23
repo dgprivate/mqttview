@@ -19,8 +19,8 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	josejwt "github.com/go-jose/go-jose/v4/jwt"
 
-	"github.com/mqttview/mqttview/internal/config"
-	"github.com/mqttview/mqttview/internal/store"
+	"github.com/dgprivate/mqttview/internal/config"
+	"github.com/dgprivate/mqttview/internal/store"
 )
 
 // fakeIDP is a minimal OIDC provider: discovery, a JWKS and a token endpoint

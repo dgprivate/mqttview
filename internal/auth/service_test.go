@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mqttview/mqttview/internal/config"
-	"github.com/mqttview/mqttview/internal/secrets"
-	"github.com/mqttview/mqttview/internal/store"
+	"github.com/dgprivate/mqttview/internal/config"
+	"github.com/dgprivate/mqttview/internal/secrets"
+	"github.com/dgprivate/mqttview/internal/store"
 )
 
 const testPassword = "correct-horse-battery-staple"

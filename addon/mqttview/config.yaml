@@ -12,12 +12,23 @@ name: mqttview
 version: "0.1.0"
 slug: mqttview
 description: A realtime web UI for MQTT brokers, with Home Assistant discovery and a Beckhoff PLC panel
-url: https://github.com/mqttview/mqttview
+url: https://github.com/dgprivate/mqttview
 arch:
   - aarch64
   - amd64
   - armv7
-image: ghcr.io/mqttview/mqttview-addon-{arch}
+# No `image:` on purpose, for now.
+#
+# With one, Home Assistant pulls a prebuilt add-on image per architecture and
+# refuses to install if it is missing — four images to publish and keep in step
+# with the binary. Without one, it builds this add-on's small Dockerfile
+# locally, which pulls hausbit/mqttview and adds the entrypoint. That is one
+# image to publish, works on every architecture the base image supports, and
+# costs a minute on first install.
+#
+# Add `image: hausbit/mqttview-addon-{arch}` once there is a workflow building
+# those, and not before: an add-on that points at an image nobody published is
+# an add-on nobody can install.
 
 # The sidebar entry.
 ingress: true

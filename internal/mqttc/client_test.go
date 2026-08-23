@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mqttview/mqttview/internal/testutil"
+	"github.com/dgprivate/mqttview/internal/testutil"
 )
 
 func TestBuildTLSConfig(t *testing.T) {

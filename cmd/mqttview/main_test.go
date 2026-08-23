@@ -15,11 +15,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mqttview/mqttview/internal/auth"
-	"github.com/mqttview/mqttview/internal/config"
-	"github.com/mqttview/mqttview/internal/mqttc"
-	"github.com/mqttview/mqttview/internal/secrets"
-	"github.com/mqttview/mqttview/internal/store"
+	"github.com/dgprivate/mqttview/internal/auth"
+	"github.com/dgprivate/mqttview/internal/config"
+	"github.com/dgprivate/mqttview/internal/mqttc"
+	"github.com/dgprivate/mqttview/internal/secrets"
+	"github.com/dgprivate/mqttview/internal/store"
 )
 
 func testStore(t *testing.T) *store.Store {

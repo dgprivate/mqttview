@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mqttview/mqttview/internal/auth"
-	"github.com/mqttview/mqttview/internal/config"
+	"github.com/dgprivate/mqttview/internal/auth"
+	"github.com/dgprivate/mqttview/internal/config"
 )
 
 // Home Assistant mode end to end, through the router that actually runs. The

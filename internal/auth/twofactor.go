@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mqttview/mqttview/internal/store"
+	"github.com/dgprivate/mqttview/internal/store"
 )
 
 var (

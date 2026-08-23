@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mqttview/mqttview/internal/mqttc"
+	"github.com/dgprivate/mqttview/internal/mqttc"
 )
 
 // ConnectionRecord is a persisted broker connection plus its audit fields.

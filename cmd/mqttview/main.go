@@ -15,20 +15,20 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mqttview/mqttview/internal/api"
-	"github.com/mqttview/mqttview/internal/auth"
-	"github.com/mqttview/mqttview/internal/config"
-	"github.com/mqttview/mqttview/internal/hub"
-	"github.com/mqttview/mqttview/internal/mqttc"
-	"github.com/mqttview/mqttview/internal/plugin"
-	"github.com/mqttview/mqttview/internal/secrets"
-	"github.com/mqttview/mqttview/internal/store"
-	webui "github.com/mqttview/mqttview/web"
+	"github.com/dgprivate/mqttview/internal/api"
+	"github.com/dgprivate/mqttview/internal/auth"
+	"github.com/dgprivate/mqttview/internal/config"
+	"github.com/dgprivate/mqttview/internal/hub"
+	"github.com/dgprivate/mqttview/internal/mqttc"
+	"github.com/dgprivate/mqttview/internal/plugin"
+	"github.com/dgprivate/mqttview/internal/secrets"
+	"github.com/dgprivate/mqttview/internal/store"
+	webui "github.com/dgprivate/mqttview/web"
 
 	// Bundled plugins register themselves on import. Adding a plugin to a
 	// build is one import line.
-	_ "github.com/mqttview/mqttview/internal/plugins/hass"
-	_ "github.com/mqttview/mqttview/internal/plugins/plc"
+	_ "github.com/dgprivate/mqttview/internal/plugins/hass"
+	_ "github.com/dgprivate/mqttview/internal/plugins/plc"
 )
 
 // version is overridden at build time with -ldflags "-X main.version=...".
