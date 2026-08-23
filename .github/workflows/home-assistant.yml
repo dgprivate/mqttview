@@ -83,6 +83,26 @@ jobs:
           sudo apt-get update && sudo apt-get install -y shellcheck
           shellcheck addon/run.sh
 
+      - name: The pinned mqttview image exists
+        run: |
+          # The app pins the binary it wraps by tag. A pin to something that
+          # was never published is an app that fails to build on somebody's
+          # Home Assistant, at install time, with a Docker error.
+          set -euo pipefail
+          image=$(grep -oP 'MQTTVIEW_IMAGE: \K\S+' addon/build.yaml)
+          echo "pinned to ${image}"
+          docker manifest inspect "${image}" > /dev/null
+          echo "the pinned image is published"
+
+          # And it has to be the same one the Dockerfile defaults to, or a
+          # local build and a Supervisor build produce different binaries.
+          default=$(grep -oP 'ARG MQTTVIEW_IMAGE=\K\S+' addon/Dockerfile)
+          [ "${image}" = "${default}" ] || {
+            echo "build.yaml pins ${image} but the Dockerfile defaults to ${default}"
+            exit 1
+          }
+          echo "the Dockerfile default matches"
+
       - name: The layout the Supervisor requires
         run: |
           # frenck's linter checks the manifest; nothing checks where it sits.

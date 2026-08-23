@@ -134,7 +134,10 @@ fallback_user="$(option fallback_user)"
     fi
 } > "${CONFIG}"
 
-echo "mqttview: starting in Home Assistant mode (log level ${log_level})"
+say "starting in Home Assistant mode (log level ${log_level})"
+# The version the binary reports, next to the add-on's own, because they are
+# different things and a mismatch is otherwise invisible.
+say "binary: $(/usr/local/bin/mqttview -version 2>/dev/null || echo unknown)"
 
 exec /usr/local/bin/mqttview \
     -config "${CONFIG}" \

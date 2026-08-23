@@ -16,6 +16,26 @@ mqttview appears in the sidebar. There is no login: Home Assistant has already
 decided you may open the panel, and asking again would be a second password to
 lose rather than a second lock.
 
+## Updating
+
+Home Assistant does not notice a new version until the store is refreshed. Left
+out, `ha apps update` answers *No update available* for a version that is
+sitting right there:
+
+```bash
+ha store reload
+ha apps update <slug>
+ha apps restart <slug>
+```
+
+In the interface it is ⋮ → **Check for updates** on the store page, then the
+app's Update button.
+
+The log names both versions on every start — the app's, and the mqttview binary
+inside it. They are different things, and the binary is pinned by digest, so an
+update to the app is an update to a specific binary rather than to whatever was
+cached.
+
 ## Configuration
 
 ### `default_role`
