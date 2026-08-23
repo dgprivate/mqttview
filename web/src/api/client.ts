@@ -1,6 +1,7 @@
 import { apiURL } from './base'
 import type {
   AuthConfig,
+  Health,
   Connection,
   ConnectionInput,
   HassDevice,
@@ -119,6 +120,10 @@ export function looksBinary(base64: string | null | undefined): boolean {
 }
 
 export const api = {
+  /** health is public: it is what a container probe calls, and it carries the
+   *  running version, which is the only way to tell what is actually live. */
+  health: () => request<Health>('/api/health'),
+
   // --- auth ---
   authConfig: () => request<AuthConfig>('/api/auth/config'),
   /** login sends the code only when the server has asked for one. */

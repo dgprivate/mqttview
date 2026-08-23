@@ -33,6 +33,15 @@ export interface AuthConfig {
   needsBootstrap: boolean
 }
 
+/** Health is what /api/health reports, and the only place the running version
+ *  is available to the UI. */
+export interface Health {
+  status: string
+  version: string
+  connections: number
+  wsClients: number
+}
+
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
 
 export interface Status {

@@ -1213,3 +1213,42 @@ th {
     opacity: 0.6;
   }
 }
+
+/* The running build, at the bottom of every page.
+ *
+ * Quiet by design: it answers "what is live" when somebody goes looking and
+ * stays out of the way the rest of the time. margin-top:auto pins it to the
+ * bottom of the flex column even on a short page, rather than leaving it
+ * floating under the content. */
+.footer {
+  margin-top: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 0.8125rem;
+}
+
+.footer a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  /* A real tap target on a phone, without making the row tall on a desktop. */
+  display: inline-block;
+  padding: 0.4rem 0;
+}
+
+.footer a:hover,
+.footer a:active {
+  color: var(--text);
+}
+
+.footer-note {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}

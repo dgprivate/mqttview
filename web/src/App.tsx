@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom'
 import { basePath } from './api/base'
+import type { Health as HealthInfo } from './api/types'
 import { api } from './api/client'
 import type { PluginInfo } from './api/types'
 import { AuthProvider, useAuth } from './auth/AuthContext'
@@ -55,7 +56,55 @@ function Shell() {
           <Route path="*" element={<Navigate to="/connections" replace />} />
         </Routes>
       </main>
+      <Footer />
     </div>
+  )
+}
+
+/**
+ * Footer shows which build is running.
+ *
+ * It exists because "is my change live?" had no answer short of reading the
+ * container log: the version reaches /api/health and nothing displayed it. It
+ * is the first thing to check when something behaves like an older version,
+ * which after an update is more often than not exactly what it is.
+ */
+function Footer() {
+  const { mode } = useAuth()
+  const [health, setHealth] = useState<HealthInfo | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    api
+      .health()
+      .then((h) => {
+        if (!cancelled) setHealth(h)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  if (!health) return null
+
+  // A tagged release links to its notes; a commit build links to the commit.
+  // Either way the link answers "what is in this" without asking anybody.
+  const tagged = /^\d+\.\d+\.\d+/.test(health.version)
+  const href = tagged
+    ? `https://github.com/dgprivate/mqttview/releases/tag/v${health.version}`
+    : `https://github.com/dgprivate/mqttview/commit/${health.version}`
+
+  return (
+    <footer className="footer">
+      <span>
+        mqtt<strong>view</strong>{' '}
+        <a href={href} target="_blank" rel="noreferrer noopener" className="mono">
+          {health.version}
+        </a>
+      </span>
+      {mode === 'ingress' && <span className="footer-note">Home Assistant mode</span>}
+    </footer>
   )
 }
 
@@ -81,6 +130,7 @@ function IngressBlocked() {
           </p>
         </div>
       </main>
+      <Footer />
     </div>
   )
 }
