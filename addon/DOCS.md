@@ -76,6 +76,19 @@ Broker credentials are encrypted with a key generated on first start and kept
 beside the database. A backup contains both, which is what makes a restore
 work — treat the backup accordingly.
 
+### `import_mqtt`
+
+On by default. The app asks the Supervisor for the broker Home Assistant is
+already using and creates that connection on first start.
+
+It works when the broker is **provided by an add-on** — the Mosquitto add-on,
+usually — because that is what the Supervisor knows about. A broker configured
+directly in the MQTT integration, or one running elsewhere on your network, is
+not something the Supervisor can tell anybody about, so nothing is imported and
+the log says so. Add it in mqttview once; it is stored and stays.
+
+Whatever happens is in the add-on log, including the reason it did nothing.
+
 ## The MQTT broker
 
 The add-on asks Home Assistant for the MQTT service, so if you run the

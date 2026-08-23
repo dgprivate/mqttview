@@ -11,10 +11,12 @@ FROM ${MQTTVIEW_IMAGE} AS mqttview
 
 FROM ${BUILD_FROM}
 
-# jq reads options.json. bashio is already in the Home Assistant base image and
-# is what every add-on uses to talk to the Supervisor.
+# jq reads options.json and the Supervisor's answers; curl asks it. Neither is
+# assumed to be in the base image — the MQTT import failed silently once
+# because the request never ran, and a missing tool is indistinguishable from a
+# Supervisor that has nothing to say.
 # hadolint ignore=DL3018
-RUN apk add --no-cache jq
+RUN apk add --no-cache jq curl
 
 COPY --from=mqttview /usr/local/bin/mqttview /usr/local/bin/mqttview
 
