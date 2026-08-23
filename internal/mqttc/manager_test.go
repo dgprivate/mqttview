@@ -2,6 +2,8 @@ package mqttc_test
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -130,6 +132,19 @@ func TestRetainedMessagesPopulateTree(t *testing.T) {
 	subscriber := mqttc.NewManager(nil)
 	defer subscriber.Shutdown(context.Background())
 
+	// Every message the subscriber sees, kept so a failure says what actually
+	// arrived. This assertion failed once on a loaded machine and never again
+	// in a thousand runs on a quiet one; without the record there is nothing
+	// to look at the next time it happens.
+	var seenMu sync.Mutex
+	var seen []string
+	subscriber.AddObserver(mqttc.Observer{OnMessage: func(m mqttc.Message) {
+		seenMu.Lock()
+		seen = append(seen, fmt.Sprintf("seq=%d topic=%s retain=%t qos=%d payload=%q",
+			m.Seq, m.Topic, m.Retain, m.QoS, m.Payload))
+		seenMu.Unlock()
+	}})
+
 	sub, err := subscriber.Upsert(ctx, mqttc.ConnectionSpec{
 		ID: "sub", Name: "subscriber", URL: url, Version: mqttc.V311, CleanStart: true,
 		Subscriptions: []mqttc.Subscription{{Filter: "retained/#", QoS: 1}},
@@ -151,7 +166,10 @@ func TestRetainedMessagesPopulateTree(t *testing.T) {
 		t.Fatalf("retained payload = %q", v.Payload)
 	}
 	if !v.Retain {
-		t.Error("retained flag was not preserved")
+		seenMu.Lock()
+		defer seenMu.Unlock()
+		t.Errorf("retained flag was not preserved; the subscriber saw:\n  %s",
+			strings.Join(seen, "\n  "))
 	}
 }
 

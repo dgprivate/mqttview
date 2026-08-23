@@ -330,8 +330,22 @@ func TestASessionSurvivesAReconnectWhenCleanStartIsOff(t *testing.T) {
 			ID: "resumed", URL: b.url("mqtt"), Version: mqttc.V311,
 			ClientID: clientID, CleanStart: false,
 		})
-		if got := string(resumed.await(t, topic, 20*time.Second).Payload); got != "while away" {
-			t.Errorf("the message queued for the offline session = %q", got)
+
+		// Waiting for the payload rather than for the first message on the
+		// topic. A session that was cut off mid-acknowledgement is redelivered
+		// its unacknowledged messages first, so "first" can legitimately
+		// arrive again ahead of the one published while the client was away —
+		// that is the session working, not failing.
+		deadline := time.After(30 * time.Second)
+		for {
+			select {
+			case m := <-resumed.messages:
+				if m.Topic == topic && string(m.Payload) == "while away" {
+					return
+				}
+			case <-deadline:
+				t.Fatalf("the message published while the session was offline never arrived")
+			}
 		}
 	})
 }
