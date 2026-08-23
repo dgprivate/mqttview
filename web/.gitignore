@@ -8,7 +8,14 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
+
+# The build output, except one placeholder: `//go:embed all:dist` in
+# ../web/embed.go needs the directory to be non-empty, or a fresh checkout does
+# not compile at all. Excluding `dist` outright would win over the root
+# .gitignore's exception, because git will not re-include a file whose parent
+# directory is excluded.
+dist/*
+!dist/.gitkeep
 dist-ssr
 *.local
 

@@ -1,0 +1,6 @@
+Keeps web/dist non-empty so `//go:embed all:dist` compiles on a fresh
+checkout, before anybody has run `npm run build`.
+
+It lives in public/ so that every build copies it back into dist/. Committing
+it only into dist/ would work until the first build deleted it, and then the
+repository would show a deletion nobody made.

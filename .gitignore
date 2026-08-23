@@ -2,8 +2,9 @@
 /mqttview
 /mqttview-mcp
 /dist/
-/web/dist/*
-!/web/dist/index.html
+# web/dist is handled by web/.gitignore, which is the file git consults first
+# for anything under web/. Saying it twice is how the exception below it came
+# to be silently ineffective.
 /web/node_modules/
 
 # Runtime data — contains broker credentials and the encryption key
