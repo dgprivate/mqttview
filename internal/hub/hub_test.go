@@ -14,6 +14,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/dgprivate/mqttview/internal/mqttc"
+	"github.com/dgprivate/mqttview/internal/testutil"
 )
 
 func quietLog() *slog.Logger {
@@ -95,12 +96,9 @@ func TestClientCountTracksConnections(t *testing.T) {
 	_ = conn.Close(websocket.StatusNormalClosure, "")
 
 	// The hub removes the client when its read loop ends.
-	for i := 0; i < 50 && h.Clients() != 0; i++ {
-		time.Sleep(20 * time.Millisecond)
-	}
-	if got := h.Clients(); got != 0 {
-		t.Errorf("Clients() = %d after disconnect, want 0", got)
-	}
+	testutil.WaitFor(t, 5*time.Second, "the hub to drop the disconnected client", func() bool {
+		return h.Clients() == 0
+	})
 }
 
 func TestAMessageOnlyReachesAClientWatchingIt(t *testing.T) {

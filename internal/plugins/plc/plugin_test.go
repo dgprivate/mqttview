@@ -18,6 +18,7 @@ import (
 	"github.com/dgprivate/mqttview/internal/mqttc"
 	"github.com/dgprivate/mqttview/internal/plugin"
 	"github.com/dgprivate/mqttview/internal/store"
+	"github.com/dgprivate/mqttview/internal/testutil"
 )
 
 // fakeHost is the plugin runtime, reduced to what a plugin can actually
@@ -287,17 +288,11 @@ func TestHandleMessageBuildsStateAndNotifiesTheBrowser(t *testing.T) {
 	}
 
 	// The batching loop emits at most four times a second; wait for one.
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
+	testutil.WaitFor(t, 5*time.Second, "a change event to reach the browser", func() bool {
 		h.mu.Lock()
-		n := len(h.events)
-		h.mu.Unlock()
-		if n > 0 {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatal("no change event reached the browser")
+		defer h.mu.Unlock()
+		return len(h.events) > 0
+	})
 }
 
 func TestAMessageOutsideThePrefixIsIgnored(t *testing.T) {

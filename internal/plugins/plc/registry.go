@@ -292,7 +292,21 @@ func applyActuator(c *connState, connID string, rt route, topic string, payload 
 	// These branches have no shared schema, so a JSON object is kept whole and
 	// a bare scalar is read as the state directly.
 	trimmed := strings.TrimSpace(string(payload))
-	if strings.HasPrefix(trimmed, "{") && json.Valid(payload) {
+
+	// An empty payload is MQTT's way of clearing a retained message. Taking it
+	// as a state would put a device in the panel with nothing to show, at the
+	// exact moment the broker said to forget it.
+	if trimmed == "" {
+		return false
+	}
+	// Something that opens like an object and does not parse was meant to be
+	// JSON and is broken. A scalar state is a word like "locked"; showing
+	// `{"state":` as a device's state helps nobody.
+	if strings.HasPrefix(trimmed, "{") && !json.Valid(payload) {
+		return false
+	}
+
+	if strings.HasPrefix(trimmed, "{") {
 		a.Raw = json.RawMessage(append([]byte(nil), payload...))
 		var probe map[string]any
 		if err := json.Unmarshal(payload, &probe); err == nil {

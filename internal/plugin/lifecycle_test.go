@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/dgprivate/mqttview/internal/mqttc"
+	"github.com/dgprivate/mqttview/internal/testutil"
 )
 
 // The runtime's contract with a plugin: it is built when enabled, torn down
@@ -211,10 +212,9 @@ func TestMessagesOnlyReachAPluginThatSubscribedToThem(t *testing.T) {
 	rt.dispatch(mqttc.Message{ConnectionID: "c1", Topic: "recorder/a", Payload: []byte("1")})
 	rt.dispatch(mqttc.Message{ConnectionID: "c1", Topic: "somewhere/else", Payload: []byte("2")})
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) && p.seen() == 0 {
-		time.Sleep(20 * time.Millisecond)
-	}
+	testutil.WaitFor(t, 5*time.Second, "the plugin to receive the message it subscribed to", func() bool {
+		return p.seen() > 0
+	})
 	if got := p.seen(); got != 1 {
 		t.Fatalf("the plugin saw %d messages, want only the one it subscribed to", got)
 	}

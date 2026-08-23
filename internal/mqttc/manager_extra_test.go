@@ -279,7 +279,10 @@ func TestStartAutoConnectSkipsWhatIsNotAskedFor(t *testing.T) {
 	defer cancel()
 	m.StartAutoConnect(ctx)
 
-	time.Sleep(100 * time.Millisecond)
+	// Shutdown waits for every supervisor it started. With autoConnect off it
+	// started none, so this returns at once and the assertion below is exact —
+	// where a sleep would only have been long enough to probably be true.
+	m.Shutdown(context.Background())
 	if c.wantsConnection() {
 		t.Error("a connection with autoConnect off was connected anyway")
 	}

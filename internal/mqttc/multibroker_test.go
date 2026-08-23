@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dgprivate/mqttview/internal/mqttc"
+	"github.com/dgprivate/mqttview/internal/testutil"
 )
 
 // TestSeveralBrokersAtOnce is the multi-connection guarantee: one mqttview
@@ -14,9 +15,8 @@ import (
 // own protocol version and credentials, and neither their state nor their
 // messages bleed into one another.
 func TestSeveralBrokersAtOnce(t *testing.T) {
-	brokerA := startBroker(t)
-	brokerB := startBroker(t)
-	brokerC := startBroker(t)
+	a, b, c := brokerFor(t), brokerFor(t), brokerFor(t)
+	brokerA, brokerB, brokerC := a.URL, b.URL, c.URL
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -62,7 +62,14 @@ func TestSeveralBrokersAtOnce(t *testing.T) {
 		}
 	}
 
-	time.Sleep(300 * time.Millisecond)
+	// Each connection subscribes to its own site prefix; publishing before
+	// those land loses the message on a slow machine and passes on a fast one.
+	for _, br := range []*testutil.Broker{a, b, c} {
+		broker := br
+		testutil.WaitFor(t, 10*time.Second, "every subscription to reach its broker", func() bool {
+			return broker.HasSubscription("site/#")
+		})
+	}
 
 	// Each broker gets a distinct topic. Since the brokers are unrelated, a
 	// message must only ever surface on the connection that published it.
@@ -126,8 +133,8 @@ func TestSeveralBrokersAtOnce(t *testing.T) {
 // does not disturb its neighbours — the manager's map and the observer list
 // are shared, so this is worth pinning down.
 func TestRemovingOneBrokerLeavesTheOthers(t *testing.T) {
-	brokerA := startBroker(t)
-	brokerB := startBroker(t)
+	a, b := brokerFor(t), brokerFor(t)
+	brokerA, brokerB := a.URL, b.URL
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -162,8 +169,11 @@ func TestRemovingOneBrokerLeavesTheOthers(t *testing.T) {
 		t.Fatalf("connection b is %q after removing a, want connected", st.State)
 	}
 
-	// It must still work, not merely still exist.
-	time.Sleep(200 * time.Millisecond)
+	// It must still work, not merely still exist. The broker having a client
+	// is the observable form of "the session survived removing its neighbour".
+	testutil.WaitFor(t, 10*time.Second, "the surviving connection to still hold a session", func() bool {
+		return len(b.Server.Clients.GetAll()) > 0
+	})
 	if err := conn.Publish(ctx, mqttc.PublishRequest{Topic: "still/alive", Payload: []byte("yes")}); err != nil {
 		t.Fatalf("publish on the surviving connection: %v", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -248,25 +249,28 @@ func TestAutoConnectRetriesUntilItIsToldToStop(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	before := runtime.NumGoroutine()
 	ctx, cancel := context.WithCancel(context.Background())
 	m.StartAutoConnect(ctx)
 
 	// The supervisor records the intent on its first attempt, whether or not
 	// the attempt succeeds.
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) && !c.wantsConnection() {
-		time.Sleep(50 * time.Millisecond)
-	}
-	if !c.wantsConnection() {
-		t.Fatal("the supervisor never tried")
-	}
+	testutil.WaitFor(t, 10*time.Second, "the supervisor to make its first attempt", func() bool {
+		return c.wantsConnection()
+	})
 	if st := c.Status(); st.State != StateError {
 		t.Errorf("state = %q, want error", st.State)
 	}
 
-	// Cancelling the context is how shutdown stops it.
+	// Cancelling the context is how shutdown stops it — and Shutdown waits for
+	// the loops to have stopped, so this is a statement about what has already
+	// happened rather than a sleep long enough to probably be true.
 	cancel()
-	time.Sleep(200 * time.Millisecond)
+	m.Shutdown(context.Background())
+	if runtime.NumGoroutine() > before+2 {
+		t.Errorf("a retry loop outlived Shutdown: %d goroutines, started from %d",
+			runtime.NumGoroutine(), before)
+	}
 }
 
 func TestConnackHintsCoverTheCommonRefusals(t *testing.T) {

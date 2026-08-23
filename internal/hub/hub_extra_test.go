@@ -7,6 +7,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/dgprivate/mqttview/internal/mqttc"
+	"github.com/dgprivate/mqttview/internal/testutil"
 )
 
 // A browser cannot keep up with a busy broker, and the hub's job is to be
@@ -20,9 +21,16 @@ func TestAClientThatCannotKeepUpIsToldWhatItMissed(t *testing.T) {
 	send(t, ctx, conn, map[string]any{
 		"type": "watch", "connectionId": "c1", "filter": "#", "maxRate": 1,
 	})
-	// The requested rate takes effect when the current one-second window rolls
-	// over, so the burst has to come after that and not before.
-	time.Sleep(1100 * time.Millisecond)
+	// A ping is a round trip through the same read loop, so a pong proves the
+	// watch was applied — no sleep needed for that part.
+	send(t, ctx, conn, map[string]any{"type": "ping"})
+	readUntil(t, ctx, conn, "pong")
+
+	// The window itself is the one wait that cannot be designed away: the
+	// limiter refills on a fixed one-second boundary, and the requested rate
+	// only takes effect when that boundary passes. Waiting for the boundary is
+	// the property, not an approximation of it.
+	waitForWindowRollover()
 
 	for i := 0; i < 50; i++ {
 		h.BroadcastMessage(mqttc.Message{ConnectionID: "c1", Topic: "a/b", Seq: uint64(i)})
@@ -49,7 +57,8 @@ func TestARateAboveTheCeilingIsClamped(t *testing.T) {
 	send(t, ctx, conn, map[string]any{
 		"type": "watch", "connectionId": "c1", "filter": "#", "maxRate": 1_000_000,
 	})
-	time.Sleep(100 * time.Millisecond)
+	send(t, ctx, conn, map[string]any{"type": "ping"})
+	readUntil(t, ctx, conn, "pong")
 
 	h.BroadcastMessage(mqttc.Message{ConnectionID: "c1", Topic: "a/b"})
 	if f := readUntil(t, ctx, conn, FrameMessage); f.Type != FrameMessage {
@@ -69,12 +78,9 @@ func TestTheHubSurvivesAClientDisappearingMidBroadcast(t *testing.T) {
 		h.BroadcastEvent("plugin", map[string]string{"k": "v"})
 	}
 
-	for i := 0; i < 50 && h.Clients() != 0; i++ {
-		time.Sleep(20 * time.Millisecond)
-	}
-	if got := h.Clients(); got != 0 {
-		t.Errorf("Clients() = %d after the socket went away", got)
-	}
+	testutil.WaitFor(t, 5*time.Second, "the hub to notice the socket went away", func() bool {
+		return h.Clients() == 0
+	})
 }
 
 func TestANonTextFrameIsIgnoredRatherThanClosingTheSocket(t *testing.T) {
@@ -86,9 +92,10 @@ func TestANonTextFrameIsIgnoredRatherThanClosingTheSocket(t *testing.T) {
 
 	// The socket is still usable afterwards.
 	send(t, ctx, conn, map[string]any{"type": "watch", "connectionId": "c1", "filter": "#"})
-	time.Sleep(100 * time.Millisecond)
-	h.BroadcastMessage(mqttc.Message{ConnectionID: "c1", Topic: "a/b"})
+	send(t, ctx, conn, map[string]any{"type": "ping"})
+	readUntil(t, ctx, conn, "pong")
 
+	h.BroadcastMessage(mqttc.Message{ConnectionID: "c1", Topic: "a/b"})
 	if f := readUntil(t, ctx, conn, FrameMessage); f.Type != FrameMessage {
 		t.Fatal("the socket stopped working after a binary frame")
 	}
@@ -98,7 +105,8 @@ func TestWatchingWithoutAFilterMeansEverythingOnThatConnection(t *testing.T) {
 	h, conn, ctx := dial(t)
 
 	send(t, ctx, conn, map[string]any{"type": "watch", "connectionId": "c1"})
-	time.Sleep(100 * time.Millisecond)
+	send(t, ctx, conn, map[string]any{"type": "ping"})
+	readUntil(t, ctx, conn, "pong")
 
 	h.BroadcastMessage(mqttc.Message{ConnectionID: "c1", Topic: "anything/at/all"})
 	f := readUntil(t, ctx, conn, FrameMessage)
@@ -127,4 +135,16 @@ func TestPingKeepsTheConnectionAlive(t *testing.T) {
 	if f := readUntil(t, ctx, conn, "pong"); f.Type != "pong" {
 		t.Fatal("a ping was not answered")
 	}
+}
+
+// waitForWindowRollover blocks until the limiter's fixed one-second window has
+// certainly rolled over.
+//
+// The limiter refills when a second has elapsed since the window opened, and
+// the window opened when the client connected — a moment the test cannot
+// observe. Waiting slightly more than a full window is therefore the honest
+// bound rather than a guess: any shorter wait is a race, and any longer one is
+// only slower.
+func waitForWindowRollover() {
+	time.Sleep(1100 * time.Millisecond)
 }

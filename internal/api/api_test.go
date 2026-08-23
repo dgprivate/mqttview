@@ -309,7 +309,13 @@ func TestConnectionLifecycle(t *testing.T) {
 		t.Fatalf("state = %q, want connected", created.Status.State)
 	}
 
-	time.Sleep(200 * time.Millisecond)
+	// The connection reports connected before its subscriptions have
+	// necessarily been acknowledged, and publishing into a subscription that
+	// is not live yet loses the message. Wait for the broker to say it has a
+	// client rather than sleeping and hoping.
+	testutil.WaitFor(t, 10*time.Second, "the broker to accept the subscription", func() bool {
+		return len(broker.Server.Clients.GetAll()) > 0
+	})
 
 	resp = ts.do(http.MethodPost, "/api/connections/"+created.ID+"/publish", map[string]any{
 		"topic": "demo/sensor", "payload": "42", "qos": 1,
@@ -369,7 +375,12 @@ func TestHomeAssistantPluginEndToEnd(t *testing.T) {
 	resp = ts.do(http.MethodPut, "/api/plugins/home-assistant/enabled", map[string]any{"enabled": true})
 	ts.decode(resp, http.StatusOK, nil)
 
-	time.Sleep(300 * time.Millisecond)
+	// Enabling returns as soon as the plugin's Init has run; its discovery
+	// subscription reaches the broker a moment later, and a retained config
+	// published before that never arrives.
+	testutil.WaitFor(t, 10*time.Second, "the plugin to subscribe to the discovery prefix", func() bool {
+		return broker.HasSubscription("homeassistant/#")
+	})
 
 	broker.Publish(t, "homeassistant/sensor/kitchen/config", []byte(`{
         "~": "home/kitchen",
@@ -381,9 +392,25 @@ func TestHomeAssistantPluginEndToEnd(t *testing.T) {
         "dev": {"ids": ["kitchen-node"], "name": "Kitchen node", "mf": "ACME"}
     }`), true)
 
-	// Give the plugin time to subscribe to the state topic it just learned
-	// about before the state is published.
-	time.Sleep(500 * time.Millisecond)
+	// The plugin subscribes to the state topic only after it has parsed the
+	// discovery message, so the entity existing is the signal that the
+	// subscription is on its way — and the subscription itself is what the
+	// next publish needs.
+	testutil.WaitFor(t, 10*time.Second, "the entity to be discovered", func() bool {
+		var found []struct {
+			Entities []struct{} `json:"entities"`
+		}
+		r := ts.do(http.MethodGet, "/api/p/home-assistant/devices", nil)
+		defer r.Body.Close()
+		if r.StatusCode != http.StatusOK {
+			return false
+		}
+		_ = json.NewDecoder(r.Body).Decode(&found)
+		return len(found) == 1 && len(found[0].Entities) == 1
+	})
+	testutil.WaitFor(t, 10*time.Second, "the plugin to subscribe to the state topic", func() bool {
+		return broker.HasSubscription("home/kitchen/temp")
+	})
 	broker.Publish(t, "home/kitchen/temp", []byte(`{"temperature": 21.5}`), true)
 
 	type entity struct {

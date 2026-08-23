@@ -7,13 +7,15 @@ import (
 	"time"
 
 	"github.com/dgprivate/mqttview/internal/mqttc"
+	"github.com/dgprivate/mqttview/internal/testutil"
 )
 
 // TestRoundTripEveryVersion is the load-bearing test for the client layer:
 // each supported protocol version must connect, subscribe, publish and
 // receive against a real broker.
 func TestRoundTripEveryVersion(t *testing.T) {
-	url := startBroker(t)
+	broker := brokerFor(t)
+	url := broker.URL
 
 	for _, tc := range []struct {
 		name    string
@@ -54,9 +56,12 @@ func TestRoundTripEveryVersion(t *testing.T) {
 				t.Fatalf("state = %q, want connected", got)
 			}
 
-			// The broker only routes to an established subscription, so give
-			// the SUBSCRIBE a moment to land before publishing.
-			time.Sleep(200 * time.Millisecond)
+			// The broker only routes to an established subscription. Connect
+			// returns once the session is up, which is earlier than that, so
+			// the test waits for the broker to say the filter is registered.
+			testutil.WaitFor(t, 10*time.Second, "the subscription to reach the broker", func() bool {
+				return broker.HasSubscription("test/#")
+			})
 
 			if err := conn.Publish(ctx, mqttc.PublishRequest{
 				Topic:   "test/room/temperature",
@@ -136,26 +141,25 @@ func TestRetainedMessagesPopulateTree(t *testing.T) {
 		t.Fatalf("connect subscriber: %v", err)
 	}
 
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if v, ok := sub.Tree().Value("retained/value"); ok {
-			if string(v.Payload) != "kept" {
-				t.Fatalf("retained payload = %q", v.Payload)
-			}
-			if !v.Retain {
-				t.Error("retained flag was not preserved")
-			}
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
+	testutil.WaitFor(t, 10*time.Second, "the retained message to arrive", func() bool {
+		_, ok := sub.Tree().Value("retained/value")
+		return ok
+	})
+
+	v, _ := sub.Tree().Value("retained/value")
+	if string(v.Payload) != "kept" {
+		t.Fatalf("retained payload = %q", v.Payload)
 	}
-	t.Fatal("retained message never arrived")
+	if !v.Retain {
+		t.Error("retained flag was not preserved")
+	}
 }
 
 // TestEphemeralSubscriptionsStayOutOfTheSpec guards the boundary that lets a
 // plugin subscribe without editing the user's saved connection.
 func TestEphemeralSubscriptionsStayOutOfTheSpec(t *testing.T) {
-	url := startBroker(t)
+	broker := brokerFor(t)
+	url := broker.URL
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
@@ -190,20 +194,16 @@ func TestEphemeralSubscriptionsStayOutOfTheSpec(t *testing.T) {
 		mu.Unlock()
 	}})
 
-	time.Sleep(200 * time.Millisecond)
+	testutil.WaitFor(t, 10*time.Second, "the ephemeral subscription to reach the broker", func() bool {
+		return broker.HasSubscription("plugin/#")
+	})
 	if err := conn.Publish(ctx, mqttc.PublishRequest{Topic: "plugin/hello", Payload: []byte("x")}); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	testutil.WaitFor(t, 10*time.Second, "the ephemeral subscription to deliver", func() bool {
 		mu.Lock()
-		n := len(got)
-		mu.Unlock()
-		if n > 0 {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatal("ephemeral subscription did not deliver a message")
+		defer mu.Unlock()
+		return len(got) > 0
+	})
 }

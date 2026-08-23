@@ -117,9 +117,12 @@ func TestJournalWaitReturnsNextMatchingEdge(t *testing.T) {
 	}()
 
 	// Falling edges keep the waiter blocked; the rising one releases it.
-	time.Sleep(20 * time.Millisecond)
+	//
+	// No sleep between them: Append takes the journal's lock and the waiter
+	// re-checks under the same lock, so the ordering is the journal's rather
+	// than the scheduler's. Spacing them out only made the test slower and hid
+	// the case where both land before the waiter looks.
 	j.Append(Edge{Name: "DI-2", From: true, To: false})
-	time.Sleep(20 * time.Millisecond)
 	j.Append(Edge{Name: "DI-3", From: false, To: true})
 
 	select {

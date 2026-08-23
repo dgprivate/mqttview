@@ -178,3 +178,49 @@ func SelfSignedPEM(commonName string) (certPEM, keyPEM string, err error) {
 	}))
 	return certPEM, keyPEM, nil
 }
+
+// HasSubscription reports whether any connected client is subscribed to the
+// exact filter.
+//
+// It is the difference between "the plugin says it subscribed" and "the broker
+// will deliver to it", and the tests that publish a retained message need the
+// second one: a message published before the subscription lands is simply
+// never seen.
+func (b *Broker) HasSubscription(filter string) bool {
+	for _, cl := range b.Server.Clients.GetAll() {
+		for _, sub := range cl.State.Subscriptions.GetAll() {
+			if sub.Filter == filter {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// WaitFor blocks until cond returns true, and fails the test if it never does.
+//
+// It replaces `time.Sleep(100ms)` followed by an assertion. The sleep version
+// has two failure modes and both are bad: on a fast machine it wastes the
+// difference, and on a slow one it asserts before the thing it is waiting for
+// has happened. When that assertion happens to pass anyway — because the test
+// checks something weaker than it claims — the result is a green test that
+// exercises nothing, which is exactly what made this project's coverage drop
+// two points on a CI runner while staying green.
+//
+// desc is what the test is waiting for, phrased so the failure reads as a
+// sentence: "timed out waiting for the broker to report connected".
+func WaitFor(t *testing.T, timeout time.Duration, desc string, cond func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if cond() {
+		return
+	}
+	t.Fatalf("timed out after %v waiting for %s", timeout, desc)
+}
