@@ -9,7 +9,7 @@
 # that did not come through the Supervisor, so it would be a door to a refusal
 # page, but a port nobody needs is a port nobody should open.
 name: mqttview
-version: "0.1.0"
+version: "0.1.1"
 slug: mqttview
 description: A realtime web UI for MQTT brokers, with Home Assistant discovery and a Beckhoff PLC panel
 url: https://github.com/dgprivate/mqttview
@@ -51,6 +51,7 @@ services:
   - mqtt:want
 
 options:
+  import_mqtt: true
   log_level: info
   default_role: operator
   admin_users: []
@@ -58,6 +59,10 @@ options:
   frame_ancestors: []
 
 schema:
+  # Create a connection to the broker Home Assistant already uses, on first
+  # start, if there is not one already. Only ever adds: a connection you have
+  # edited is left alone.
+  import_mqtt: bool?
   log_level: list(debug|info|warn|error)
   # What a Home Assistant user may do in mqttview on first sight. Home
   # Assistant does not tell an add-on whether somebody is one of its

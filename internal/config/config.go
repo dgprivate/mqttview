@@ -39,6 +39,14 @@ type Config struct {
 	TLS  TLSConfig  `yaml:"tls"`
 	Auth AuthConfig `yaml:"auth"`
 
+	// Connections are broker connections to create on first start if they are
+	// not there yet, so an install can arrive already pointed at a broker
+	// instead of at an empty page.
+	//
+	// Seeding only ever adds. A connection that already exists by name is left
+	// exactly as it is, because whoever edited it in the UI meant it.
+	Connections []ConnectionSeed `yaml:"connections"`
+
 	// Plugins maps a plugin ID to its enablement and settings.
 	Plugins map[string]PluginConfig `yaml:"plugins"`
 }
@@ -169,6 +177,34 @@ type SAMLProviderConfig struct {
 	AllowedDomains []string `yaml:"allowed_domains"`
 	// AdminEmails are granted the admin role on first login.
 	AdminEmails []string `yaml:"admin_emails"`
+}
+
+// ConnectionSeed is a broker connection declared in configuration.
+//
+// It is deliberately a small subset of what the UI can set: enough to reach a
+// broker and see something, not a second way to express every option. Anything
+// beyond this is a click away once the connection exists.
+type ConnectionSeed struct {
+	Name     string `yaml:"name"`
+	URL      string `yaml:"url"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+	// Version is "3.1", "3.1.1" or "5"; empty means 3.1.1.
+	Version string `yaml:"version"`
+	// Subscribe are topic filters to subscribe to. Empty means "#", because a
+	// connection that shows nothing is not obviously working.
+	Subscribe []string `yaml:"subscribe"`
+	// AutoConnect defaults to true: a connection somebody put in a config file
+	// is one they want up.
+	AutoConnect *bool `yaml:"auto_connect"`
+	// InsecureSkipVerify accepts any TLS certificate. For a home broker with a
+	// self-signed one; it is a real hole and is named so it reads like one.
+	InsecureSkipVerify bool `yaml:"insecure_skip_verify"`
+}
+
+// Wanted reports whether this connection should be dialled on boot.
+func (c ConnectionSeed) Wanted() bool {
+	return c.AutoConnect == nil || *c.AutoConnect
 }
 
 // PluginConfig is per-plugin enablement plus free-form settings that the

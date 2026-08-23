@@ -92,13 +92,33 @@ that can only be a path — no other origin, no quotes, no control characters.
 Outside ingress mode it is ignored entirely, because outside ingress mode
 nothing has checked who set it.
 
+### The broker you already have
+
+Home Assistant knows where your MQTT broker is if the MQTT integration is set
+up, so the app asks the Supervisor for it and creates the connection on first
+start. Nobody copies a host, a port and a password into a second form.
+
+It only ever adds. A connection you have since edited is left exactly as it is,
+because a configuration that reasserts itself on every restart is a setting
+that will not stay set. Turn it off with `import_mqtt: false` if you would
+rather add brokers yourself.
+
+The same mechanism is available outside Home Assistant: `connections:` in
+`mqttview.yaml` declares brokers to create if they are not there yet.
+
 ### Roles
 
 Home Assistant does not tell an app whether you are one of its
 administrators. mqttview cannot copy a fact it is not told, so instead:
 
-- everybody who opens the panel gets `default_role` (`operator` by default);
+- **the first person to open the panel becomes an administrator**, once, on an
+  installation that has none — otherwise the first run is a dead end, because
+  the default role cannot add a broker and the panel tells whoever just
+  installed it to ask an administrator, who is them;
+- everybody after that gets `default_role` (`operator` by default);
 - `admin_users` lists Home Assistant usernames or IDs that get `admin`;
+- the last administrator is never demoted by configuration, for the same reason
+  the API refuses to delete them;
 - both are re-applied on every request, so a change takes effect on the next
   page load — including taking somebody *out* of `admin_users`.
 

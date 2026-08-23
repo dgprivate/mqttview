@@ -406,3 +406,131 @@ func TestCheckConfigRefusesAConfigurationThatWouldLetAnybodyIn(t *testing.T) {
 		t.Errorf("error %q does not name the setting", err)
 	}
 }
+
+// Connections declared in configuration exist so an install can arrive already
+// pointed at a broker. The Home Assistant app fills them in from whatever
+// broker Home Assistant is already using, which is the difference between a
+// panel that works and a panel that greets somebody with an empty list.
+
+func TestDeclaredConnectionsAreCreatedOnce(t *testing.T) {
+	db, mgr, log := seedHarness(t)
+
+	seeds := []config.ConnectionSeed{{
+		Name: "Home Assistant", URL: "mqtt://core-mosquitto:1883",
+		Username: "addons", Password: "s3cret",
+	}}
+
+	ctx := context.Background()
+	if err := seedConnections(ctx, db, mgr, seeds, log); err != nil {
+		t.Fatalf("seeding: %v", err)
+	}
+
+	stored, err := db.ListConnections()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 1 {
+		t.Fatalf("stored %d connections", len(stored))
+	}
+	got := stored[0].Spec
+	if got.Name != "Home Assistant" || got.Username != "addons" {
+		t.Errorf("connection = %+v", got)
+	}
+	// Normalised on the way in, like anything else: mqtt:// becomes tcp://.
+	if got.URL != "tcp://core-mosquitto:1883" {
+		t.Errorf("url = %q", got.URL)
+	}
+	// A connection that subscribes to nothing comes up green and shows an
+	// empty tree, which reads as broken.
+	if len(got.Subscriptions) != 1 || got.Subscriptions[0].Filter != "#" {
+		t.Errorf("subscriptions = %+v", got.Subscriptions)
+	}
+	if !got.AutoConnect {
+		t.Error("a connection declared in configuration was left disconnected")
+	}
+
+	// Seeding again on the next restart must not add a second one.
+	if err := seedConnections(ctx, db, mgr, seeds, log); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ = db.ListConnections()
+	if len(stored) != 1 {
+		t.Fatalf("a restart produced %d connections", len(stored))
+	}
+}
+
+func TestSeedingNeverOverwritesWhatSomebodyEdited(t *testing.T) {
+	db, mgr, log := seedHarness(t)
+	ctx := context.Background()
+
+	seeds := []config.ConnectionSeed{{Name: "Home Assistant", URL: "mqtt://core-mosquitto:1883"}}
+	if err := seedConnections(ctx, db, mgr, seeds, log); err != nil {
+		t.Fatal(err)
+	}
+
+	// Somebody points it at a different broker in the UI.
+	stored, _ := db.ListConnections()
+	edited := stored[0]
+	edited.Spec.URL = "tcp://elsewhere:1883"
+	if err := db.SaveConnection(edited); err != nil {
+		t.Fatal(err)
+	}
+
+	// The next restart must leave that alone. A config file that reasserts
+	// itself every boot is a setting that will not stay set.
+	if err := seedConnections(ctx, db, mgr, seeds, log); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ = db.ListConnections()
+	if len(stored) != 1 || stored[0].Spec.URL != "tcp://elsewhere:1883" {
+		t.Fatalf("the edited connection was overwritten: %+v", stored)
+	}
+}
+
+func TestAnUnusableDeclaredConnectionIsSkippedRatherThanFatal(t *testing.T) {
+	db, mgr, log := seedHarness(t)
+
+	// One good, three that cannot be made into a connection. A typo in a
+	// config file must not stop the server booting — the rest of the install
+	// still works, and the log says which one was dropped.
+	seeds := []config.ConnectionSeed{
+		{Name: "", URL: "mqtt://h:1883"},
+		{Name: "no url"},
+		{Name: "bad scheme", URL: "gopher://h:70"},
+		{Name: "bad version", URL: "mqtt://h:1883", Version: "9"},
+		{Name: "good", URL: "mqtt://h:1883"},
+	}
+	if err := seedConnections(context.Background(), db, mgr, seeds, log); err != nil {
+		t.Fatalf("one bad entry stopped the boot: %v", err)
+	}
+
+	stored, _ := db.ListConnections()
+	if len(stored) != 1 || stored[0].Spec.Name != "good" {
+		t.Fatalf("stored %+v", stored)
+	}
+}
+
+// seedHarness builds the store and manager seedConnections needs.
+func seedHarness(t *testing.T) (*store.Store, *mqttc.Manager, *slog.Logger) {
+	t.Helper()
+
+	dir := t.TempDir()
+	key, err := secrets.LoadOrCreateKey("", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	box, err := secrets.New(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(filepath.Join(dir, "test.db"), box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mgr := mqttc.NewManager(nil)
+	t.Cleanup(func() { mgr.Shutdown(context.Background()) })
+
+	return db, mgr, slog.New(slog.NewTextHandler(io.Discard, nil))
+}

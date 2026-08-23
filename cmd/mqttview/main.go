@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/dgprivate/mqttview/internal/api"
 	"github.com/dgprivate/mqttview/internal/auth"
 	"github.com/dgprivate/mqttview/internal/config"
@@ -158,6 +160,9 @@ func run() error {
 	if err := loadConnections(ctx, db, mgr, log); err != nil {
 		return err
 	}
+	if err := seedConnections(ctx, db, mgr, cfg.Connections, log); err != nil {
+		return err
+	}
 	if err := plugins.Start(ctx, pluginDefaults(cfg)); err != nil {
 		return err
 	}
@@ -242,6 +247,79 @@ func loadConnections(ctx context.Context, db *store.Store, mgr *mqttc.Manager, l
 		}
 	}
 	log.Info("loaded connections", "count", len(records))
+	return nil
+}
+
+// seedConnections creates the connections declared in configuration, for the
+// ones that are not there yet.
+//
+// It only ever adds. A connection with the same name already in the database
+// is left alone: somebody changed it in the UI, and a config file overwriting
+// that on every restart would be a setting that will not stay set.
+func seedConnections(ctx context.Context, db *store.Store, mgr *mqttc.Manager,
+	seeds []config.ConnectionSeed, log *slog.Logger) error {
+	if len(seeds) == 0 {
+		return nil
+	}
+	existing, err := db.ListConnections()
+	if err != nil {
+		return fmt.Errorf("seed connections: %w", err)
+	}
+	known := make(map[string]struct{}, len(existing))
+	for _, rec := range existing {
+		known[strings.ToLower(strings.TrimSpace(rec.Spec.Name))] = struct{}{}
+	}
+
+	for _, seed := range seeds {
+		name := strings.TrimSpace(seed.Name)
+		if name == "" || seed.URL == "" {
+			log.Warn("skipping a declared connection with no name or url")
+			continue
+		}
+		if _, ok := known[strings.ToLower(name)]; ok {
+			continue
+		}
+
+		version, err := mqttc.ParseVersion(seed.Version)
+		if err != nil {
+			log.Error("skipping a declared connection", "name", name, "error", err)
+			continue
+		}
+		filters := seed.Subscribe
+		if len(filters) == 0 {
+			// A connection that subscribes to nothing looks broken: it comes up
+			// green and the topic tree stays empty.
+			filters = []string{"#"}
+		}
+		subs := make([]mqttc.Subscription, 0, len(filters))
+		for _, f := range filters {
+			subs = append(subs, mqttc.Subscription{Filter: f})
+		}
+
+		spec := mqttc.ConnectionSpec{
+			ID:            uuid.NewString(),
+			Name:          name,
+			URL:           seed.URL,
+			Version:       version,
+			Username:      seed.Username,
+			Password:      seed.Password,
+			Subscriptions: subs,
+			AutoConnect:   seed.Wanted(),
+			TLS:           mqttc.TLSSpec{InsecureSkipVerify: seed.InsecureSkipVerify},
+		}
+		if err := spec.Normalize(); err != nil {
+			log.Error("skipping a declared connection", "name", name, "error", err)
+			continue
+		}
+		if err := db.SaveConnection(store.ConnectionRecord{Spec: spec}); err != nil {
+			return fmt.Errorf("seed connection %q: %w", name, err)
+		}
+		if _, err := mgr.Upsert(ctx, spec); err != nil {
+			log.Error("a declared connection was stored but not started", "name", name, "error", err)
+			continue
+		}
+		log.Info("created a connection from configuration", "name", name, "url", spec.URL)
+	}
 	return nil
 }
 
@@ -362,6 +440,16 @@ func describeConfig(cfg config.Config, path string) error {
 		fmt.Printf("  saml providers:  %d\n", len(cfg.Auth.SAMLProviders))
 	}
 
+	if len(cfg.Connections) > 0 {
+		fmt.Printf("connections: %d declared, created on first start if absent\n", len(cfg.Connections))
+		for _, c := range cfg.Connections {
+			creds := ""
+			if c.Username != "" {
+				creds = " as " + c.Username
+			}
+			fmt.Printf("  %-20s %s%s\n", c.Name, c.URL, creds)
+		}
+	}
 	if len(cfg.FrameAncestors) > 0 {
 		fmt.Printf("framing:     allowed from %v\n", cfg.FrameAncestors)
 	}

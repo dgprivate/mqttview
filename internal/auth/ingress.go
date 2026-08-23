@@ -174,6 +174,23 @@ func (s *Service) ingressIdentityOf(r *http.Request) (ingressIdentity, error) {
 func (s *Service) resolveIngressUser(id ingressIdentity) (store.User, error) {
 	role := s.ingressRoleFor(id)
 
+	// Whoever opens the panel first, on an installation that has no
+	// administrator yet, becomes one.
+	//
+	// Without this the first run is a dead end: the default role cannot add a
+	// broker connection, so the panel says "ask an administrator to add one" to
+	// the person who just installed it and is the only administrator there is.
+	// Standalone mode has always created a first administrator; this is the
+	// same idea, minus the password nobody could use.
+	//
+	// It applies once. The second person through gets ingress.default_role like
+	// everybody else, and admin_users still decides the rest.
+	if admins, err := s.store.CountAdmins(); err == nil && admins == 0 {
+		role = store.RoleAdmin
+		s.log.Info("granting admin to the first person to open the panel",
+			"user", id.Username, "reason", "no administrator exists yet")
+	}
+
 	u, err := s.store.GetUserByProviderSubject(ingressProvider, id.Subject)
 	switch {
 	case err == nil:
@@ -183,7 +200,25 @@ func (s *Service) resolveIngressUser(id ingressIdentity) (store.User, error) {
 		// The role is re-applied on every request, so moving somebody in or
 		// out of ingress.admin_users takes effect on their next page load
 		// rather than after an account is deleted by hand.
+		//
+		// Except that it never removes the last administrator. Without that,
+		// the person promoted on first run is demoted by their own next page
+		// load — the configuration does not name them, so the recomputed role
+		// is the default — and the installation is left with nobody who can
+		// add a broker. The API refuses to remove the last administrator for
+		// the same reason; this is that rule, applied where the role is
+		// derived rather than chosen.
 		if u.Role != role {
+			demoting := u.Role == store.RoleAdmin && role != store.RoleAdmin
+			if demoting {
+				admins, err := s.store.CountAdmins()
+				if err != nil {
+					return store.User{}, err
+				}
+				if admins <= 1 {
+					return u, nil
+				}
+			}
 			u.Role = role
 			if err := s.store.UpdateUser(u); err != nil {
 				return store.User{}, err
@@ -267,7 +302,7 @@ func (s *Service) IngressCSRF(next http.Handler) http.Handler {
 		switch r.Method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
 			if _, err := r.Cookie(CSRFCookie); err != nil {
-				s.setIngressCSRFCookie(w)
+				s.setIngressCSRFCookie(w, r)
 			}
 			next.ServeHTTP(w, r)
 			return
@@ -278,13 +313,22 @@ func (s *Service) IngressCSRF(next http.Handler) http.Handler {
 
 // setIngressCSRFCookie issues the token the frontend echoes back.
 //
-// SameSite=None with Secure, because the panel is an iframe inside Home
-// Assistant: a Lax cookie is not sent with a request from a framed document,
-// so the check would fail every write. Home Assistant serves the panel over
-// whatever scheme it is reached on, so on a plain-HTTP install the browser
-// will drop a Secure cookie and writes will be refused — which is the correct
-// failure, and the reason the documentation says to use HTTPS.
-func (s *Service) setIngressCSRFCookie(w http.ResponseWriter) {
+// SameSite=Lax, and Secure only when the browser actually reached Home
+// Assistant over HTTPS.
+//
+// The first version of this set SameSite=None and Secure unconditionally,
+// reasoning that the panel is an iframe and therefore cross-site. It is an
+// iframe, but not a cross-site one: ingress serves it from Home Assistant's own
+// origin, so Lax is sent exactly as it would be for a top-level page. The
+// unconditional Secure was the expensive half — a browser will not store a
+// Secure cookie delivered over plain HTTP, so on an install reached at
+// http://homeassistant.local:8123 the cookie never existed, the page had
+// nothing to echo, and every write came back "CSRF token missing or invalid".
+//
+// The scheme comes from X-Forwarded-Proto, which is a header and so is worth
+// only as much as the hop that set it — here that hop is the Supervisor, and
+// checkIngressSource has already proved the request came from it.
+func (s *Service) setIngressCSRFCookie(w http.ResponseWriter, r *http.Request) {
 	token, err := randomToken(32)
 	if err != nil {
 		s.log.Error("generating a CSRF token failed", "error", err)
@@ -296,8 +340,8 @@ func (s *Service) setIngressCSRFCookie(w http.ResponseWriter) {
 		Path:     "/",
 		MaxAge:   int((24 * time.Hour).Seconds()),
 		HttpOnly: false, // read by the SPA and echoed in CSRFHeader
-		Secure:   true,
-		SameSite: http.SameSiteNoneMode,
+		Secure:   strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https"),
+		SameSite: http.SameSiteLaxMode,
 	})
 }
 

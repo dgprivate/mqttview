@@ -46,6 +46,19 @@ func newIngressService(t *testing.T, mutate ...func(*config.IngressConfig)) (*Se
 	return New(db, cfg, box, slog.New(slog.NewTextHandler(io.Discard, nil))), db
 }
 
+// withExistingAdmin puts an administrator in the database, so a test exercises
+// the ordinary path rather than the first-run one where the first person
+// through the door is made admin.
+func withExistingAdmin(t *testing.T, db *store.Store) {
+	t.Helper()
+	if _, err := db.CreateUser(store.User{
+		ID: "seed-admin", Email: "someone@example.com", Name: "Someone",
+		Role: store.RoleAdmin, Provider: "local",
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // ingressRequest is what the Supervisor forwards.
 func ingressRequest(from string, headers map[string]string) *http.Request {
 	r := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
@@ -96,6 +109,7 @@ func TestTrustedProxiesAcceptsACIDR(t *testing.T) {
 
 func TestAnAccountIsCreatedOnFirstSightAndReusedAfter(t *testing.T) {
 	s, db := newIngressService(t)
+	withExistingAdmin(t, db)
 
 	first, err := s.AuthenticateIngress(ingressRequest("172.30.32.2", map[string]string{
 		IngressUserIDHeader:      "abc123",
@@ -128,7 +142,8 @@ func TestAnAccountIsCreatedOnFirstSightAndReusedAfter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(users) != 1 {
+	// The seeded administrator, plus the one Home Assistant identity.
+	if len(users) != 2 {
 		t.Fatalf("the database holds %d users", len(users))
 	}
 }
@@ -159,9 +174,12 @@ func TestRenamingSomebodyInHomeAssistantKeepsTheirAccount(t *testing.T) {
 }
 
 func TestAdminUsersAreGrantedAndRevokedOnTheNextRequest(t *testing.T) {
-	s, _ := newIngressService(t, func(c *config.IngressConfig) {
+	s, db := newIngressService(t, func(c *config.IngressConfig) {
 		c.AdminUsers = []string{"dean"}
 	})
+	// A second administrator, so revoking the first one below is a change of
+	// mind rather than the last way into the installation.
+	withExistingAdmin(t, db)
 
 	u, err := s.AuthenticateIngress(ingressRequest("172.30.32.2", map[string]string{
 		IngressUserIDHeader:   "abc123",
@@ -186,6 +204,41 @@ func TestAdminUsersAreGrantedAndRevokedOnTheNextRequest(t *testing.T) {
 	}
 	if u.Role == store.RoleAdmin {
 		t.Error("the admin role survived removal from admin_users")
+	}
+}
+
+func TestTheLastAdministratorIsNotRevokedByConfiguration(t *testing.T) {
+	// admin_users is a list of exceptions, not the complete set. Taking the
+	// only administrator out of it — or never putting them in, which is the
+	// normal case after the first-run promotion — must not leave an
+	// installation nobody can add a broker to. The API refuses to delete the
+	// last administrator for the same reason.
+	s, db := newIngressService(t)
+
+	u, err := s.AuthenticateIngress(ingressRequest("172.30.32.2", map[string]string{
+		IngressUserIDHeader: "abc123", IngressUserNameHeader: "dean",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Role != store.RoleAdmin {
+		t.Fatalf("the first user got %q", u.Role)
+	}
+
+	for i := 0; i < 3; i++ {
+		u, err = s.AuthenticateIngress(ingressRequest("172.30.32.2", map[string]string{
+			IngressUserIDHeader: "abc123", IngressUserNameHeader: "dean",
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if u.Role != store.RoleAdmin {
+			t.Fatalf("page load %d demoted the only administrator to %q", i+2, u.Role)
+		}
+	}
+
+	if admins, err := db.CountAdmins(); err != nil || admins != 1 {
+		t.Errorf("admins = %d %v", admins, err)
 	}
 }
 
@@ -390,12 +443,13 @@ func TestAnUnreadableRemoteAddressIsRefused(t *testing.T) {
 }
 
 func TestAnUnusableDefaultRoleFallsBackToTheLeastPrivilege(t *testing.T) {
-	s, _ := newIngressService(t, func(c *config.IngressConfig) {
+	s, db := newIngressService(t, func(c *config.IngressConfig) {
 		// Load() refuses this, but the service is also constructed directly by
 		// tests and by anything embedding it, so it must not read a typo as
 		// "grant everything".
 		c.DefaultRole = "administrator"
 	})
+	withExistingAdmin(t, db)
 
 	u, err := s.AuthenticateIngress(ingressRequest("172.30.32.2", map[string]string{
 		IngressUserIDHeader: "abc123",
@@ -428,11 +482,12 @@ func TestAnIdentityWithNothingUsableInItStillProducesAnAccount(t *testing.T) {
 }
 
 func TestABlankEntryInAdminUsersMatchesNobody(t *testing.T) {
-	s, _ := newIngressService(t, func(c *config.IngressConfig) {
+	s, db := newIngressService(t, func(c *config.IngressConfig) {
 		// A trailing comma in the add-on option produces one of these. It must
 		// not match an identity that happens to have an empty username.
 		c.AdminUsers = []string{"", "  "}
 	})
+	withExistingAdmin(t, db)
 
 	u, err := s.AuthenticateIngress(ingressRequest("172.30.32.2", map[string]string{
 		IngressUserIDHeader: "abc123",
@@ -461,5 +516,64 @@ func TestTheFallbackAccountGetsAReadableAddress(t *testing.T) {
 	}
 	if !store.ValidEmail(u.Email) {
 		t.Errorf("address %q is not valid", u.Email)
+	}
+}
+
+func TestTheFirstPersonThroughTheDoorBecomesAdmin(t *testing.T) {
+	// Otherwise the first run is a dead end: default_role is operator, an
+	// operator cannot add a broker connection, and the panel tells the person
+	// who just installed it to ask an administrator — who is them.
+	s, db := newIngressService(t)
+
+	first, err := s.AuthenticateIngress(ingressRequest("172.30.32.2", map[string]string{
+		IngressUserIDHeader: "abc123", IngressUserNameHeader: "dean",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Role != store.RoleAdmin {
+		t.Fatalf("the first user got %q, want admin", first.Role)
+	}
+
+	// Once. The second person is an ordinary user, or the rule would be
+	// "everybody is an administrator" with extra steps.
+	second, err := s.AuthenticateIngress(ingressRequest("172.30.32.2", map[string]string{
+		IngressUserIDHeader: "def456", IngressUserNameHeader: "guest",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Role != store.RoleOperator {
+		t.Errorf("the second user got %q, want the configured default", second.Role)
+	}
+
+	// And it does not un-admin the first one on their next request.
+	again, err := s.AuthenticateIngress(ingressRequest("172.30.32.2", map[string]string{
+		IngressUserIDHeader: "abc123", IngressUserNameHeader: "dean",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Role != store.RoleAdmin {
+		t.Errorf("the first user was demoted to %q on their next page load", again.Role)
+	}
+
+	if admins, err := db.CountAdmins(); err != nil || admins != 1 {
+		t.Errorf("admins = %d %v, want exactly one", admins, err)
+	}
+}
+
+func TestAnExistingAdminMeansNobodyIsPromoted(t *testing.T) {
+	s, db := newIngressService(t)
+	withExistingAdmin(t, db)
+
+	u, err := s.AuthenticateIngress(ingressRequest("172.30.32.2", map[string]string{
+		IngressUserIDHeader: "abc123",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Role != store.RoleOperator {
+		t.Errorf("role = %q, want the configured default", u.Role)
 	}
 }

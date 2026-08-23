@@ -23,6 +23,39 @@ option_list() {
         '.[$key] // [] | .[] | $pad + "- " + (. | tostring)' "${OPTIONS}"
 }
 
+# Home Assistant already knows about a broker if the MQTT integration is set
+# up, and asking the Supervisor for it beats making somebody copy the host,
+# port and password into a second form. `services: mqtt:want` in config.yaml is
+# what grants this; "want" rather than "need" so the app still starts without
+# one.
+mqtt_connection() {
+    [ -n "${SUPERVISOR_TOKEN:-}" ] || return 0
+
+    local service
+    service="$(curl -sSf -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+        http://supervisor/services/mqtt 2>/dev/null)" || return 0
+
+    local host port user pass ssl scheme
+    host="$(echo "${service}" | jq -r '.data.host // empty')"
+    [ -n "${host}" ] || return 0
+    port="$(echo "${service}" | jq -r '.data.port // 1883')"
+    user="$(echo "${service}" | jq -r '.data.username // empty')"
+    pass="$(echo "${service}" | jq -r '.data.password // empty')"
+    ssl="$(echo "${service}" | jq -r '.data.ssl // false')"
+
+    scheme="mqtt"
+    [ "${ssl}" = "true" ] && scheme="mqtts"
+
+    echo ""
+    echo "connections:"
+    echo "  - name: Home Assistant"
+    echo "    url: ${scheme}://${host}:${port}"
+    [ -n "${user}" ] && echo "    username: ${user}"
+    [ -n "${pass}" ] && echo "    password: ${pass}"
+    echo "    subscribe:"
+    echo "      - \"#\""
+}
+
 log_level="$(option log_level)"
 default_role="$(option default_role)"
 fallback_user="$(option fallback_user)"
@@ -65,6 +98,10 @@ fallback_user="$(option fallback_user)"
         echo ""
         echo "frame_ancestors:"
         echo "${ancestors}"
+    fi
+
+    if [ "$(option import_mqtt)" != "false" ]; then
+        mqtt_connection
     fi
 } > "${CONFIG}"
 
