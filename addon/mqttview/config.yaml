@@ -39,7 +39,6 @@ panel_admin: false
 
 init: false
 startup: services
-boot: auto
 
 # /data is the add-on's own persistent directory; the database and the
 # encryption key live there and survive an add-on update.

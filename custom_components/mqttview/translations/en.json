@@ -12,7 +12,7 @@
       }
     },
     "error": {
-      "invalid_url": "Enter a full http:// or https:// address, for example https://mqttview.example.com"
+      "invalid_url": "Enter a full address including the scheme, starting with http:// or https://"
     },
     "abort": {
       "already_configured": "The mqttview panel is already set up."
