@@ -9,7 +9,7 @@
 [![Docker Hub](https://img.shields.io/docker/v/hausbit/mqttview?sort=semver&label=Docker%20Hub)](https://hub.docker.com/r/hausbit/mqttview)
 [![image size](https://img.shields.io/docker/image-size/hausbit/mqttview/latest)](https://hub.docker.com/r/hausbit/mqttview/tags)
 [![pulls](https://img.shields.io/docker/pulls/hausbit/mqttview)](https://hub.docker.com/r/hausbit/mqttview)
-[![Go](https://img.shields.io/badge/go-1.26-blue)](https://github.com/dgprivate/mqttview/blob/main/go.mod)
+[![Go](https://img.shields.io/badge/go-1.27-blue)](https://github.com/dgprivate/mqttview/blob/main/go.mod)
 [![License MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/dgprivate/mqttview/blob/main/LICENSE)
 
 A realtime web UI for MQTT brokers — every protocol version, every transport,
