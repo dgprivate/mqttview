@@ -1,0 +1,182 @@
+# Binaries attached to a GitHub release, for people who would rather not run a
+# container.
+#
+# Hand-written rather than GoReleaser, for the same reason the image publish is:
+# every step is visible and every action is pinned, and there is not much of it.
+# If this grows a changelog generator and a package repository, reconsider.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: An existing tag to build and attach binaries to
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The frontend is the same bytes for every target, so it is built once and
+  # handed to the matrix. Building it eight times would be eight npm installs
+  # for eight identical results.
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444  # v5.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: frontend
+          path: web/dist
+          retention-days: 1
+          if-no-files-found: error
+
+  build:
+    name: ${{ matrix.goos }}/${{ matrix.goarch }}${{ matrix.goarm && format('v{0}', matrix.goarm) || '' }}
+    needs: frontend
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          # A Raspberry Pi on a 32-bit system, and an original Pi or Pi Zero.
+          - { goos: linux, goarch: arm, goarm: '7' }
+          - { goos: linux, goarch: arm, goarm: '6' }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: frontend
+          path: web/dist
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: '0'
+          GOFLAGS: -buildvcs=false
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          [ -n "${{ inputs.tag }}" ] && version="${{ inputs.tag }}" && version="${version#v}"
+
+          # The same flags the container build uses, so a binary from here and
+          # one from the image report the same version and are the same bytes.
+          go build -trimpath \
+            -ldflags "-s -w -buildid= -X main.version=${version}" \
+            -o "mqttview${{ matrix.goos == 'windows' && '.exe' || '' }}" ./cmd/mqttview
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          [ -n "${{ inputs.tag }}" ] && version="${{ inputs.tag }}" && version="${version#v}"
+
+          arch="${{ matrix.goarch }}${{ matrix.goarm && format('v{0}', matrix.goarm) || '' }}"
+          name="mqttview_${version}_${{ matrix.goos }}_${arch}"
+
+          # LICENSE and README travel with the binary: somebody who downloaded a
+          # tarball should not have to go looking for the terms.
+          mkdir -p "${name}"
+          cp LICENSE README.md "${name}/"
+          if [ "${{ matrix.goos }}" = windows ]; then
+            cp mqttview.exe "${name}/"
+            zip -qr "${name}.zip" "${name}"
+          else
+            cp mqttview "${name}/"
+            tar czf "${name}.tar.gz" "${name}"
+          fi
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: archive-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm }}
+          path: |
+            *.tar.gz
+            *.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Attach to the release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the release and upload to it
+      id-token: write   # keyless signing through Sigstore
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          pattern: archive-*
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          sha256sum ./*.tar.gz ./*.zip > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5  # v3.10.1
+
+      - name: Sign the checksums
+        # One signature over the checksum file rather than eight over the
+        # archives: verifying SHA256SUMS and then checking a hash against it is
+        # the same guarantee with one thing to verify.
+        working-directory: dist
+        run: cosign sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUMS
+
+      - name: Attach
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          # --clobber so re-running a release replaces the assets rather than
+          # failing halfway through with some uploaded and some not.
+          if ! gh release view "${TAG}" > /dev/null 2>&1; then
+            gh release create "${TAG}" --title "${TAG}" --generate-notes
+          fi
+          gh release upload "${TAG}" --clobber dist/*
+
+          gh release view "${TAG}" --json assets \
+            --jq '.assets[] | "\(.name)  \(.size) bytes"'

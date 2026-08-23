@@ -87,10 +87,16 @@ FROM ${RUNTIME_IMAGE} AS runtime-base
 ARG APP_UID
 ARG APP_GID
 
-# ca-certificates verifies TLS brokers and OIDC issuers; tzdata makes the
-# timestamps in the UI match what the operator expects. apk upgrade runs in the
-# same layer as the install, so the two cannot drift apart (CIS 4.7).
-RUN apk add --no-cache ca-certificates tzdata && \
+# ca-certificates-bundle, not ca-certificates: the bundle is the PEM file Go
+# reads, while the full package drags in openssl for tools nothing here uses —
+# libcrypto and libssl alone are 5 MB, in an image whose entire point is to be
+# small and to have little in it. Go does its own TLS.
+#
+# The zone database is compiled into the binary instead of installed, which is
+# 450 KB against 1.5 MB and removes a package that would otherwise need
+# patching. apk upgrade runs in the same layer as the install, so the two
+# cannot drift apart (CIS 4.7).
+RUN apk add --no-cache ca-certificates-bundle && \
     apk upgrade --no-cache && \
     addgroup -g "${APP_GID}" mqttview && \
     adduser -u "${APP_UID}" -G mqttview -h /home/mqttview -s /sbin/nologin -D mqttview && \

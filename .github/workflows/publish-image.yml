@@ -127,6 +127,8 @@ jobs:
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
 
+      # release.yml attaches the binaries and their signed checksums to the
+      # same release; this adds the image's inventory beside them.
       - name: Attach a signed SBOM to the release
         # Only for a tag: the release gets the inventory of what was published,
         # and a Sigstore bundle so it can be verified without trusting this

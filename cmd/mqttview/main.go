@@ -27,6 +27,11 @@ import (
 	"github.com/dgprivate/mqttview/internal/store"
 	webui "github.com/dgprivate/mqttview/web"
 
+	// The zone database, compiled in. Without it a container with no tzdata
+	// package resolves every named zone to UTC and says nothing about it, and
+	// with the package it is 1.5 MB and one more thing to patch.
+	_ "time/tzdata"
+
 	// Bundled plugins register themselves on import. Adding a plugin to a
 	// build is one import line.
 	_ "github.com/dgprivate/mqttview/internal/plugins/hass"

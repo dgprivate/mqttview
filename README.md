@@ -264,6 +264,29 @@ The published image is multi-architecture and signed. `docker build -t mqttview 
 builds the same thing from source if you would rather not trust a registry —
 which is the point of the SBOM and the signature below.
 
+### A binary
+
+Every release carries binaries for Linux, macOS and Windows on
+[the releases page](https://github.com/dgprivate/mqttview/releases), including
+`arm/v7` and `arm/v6` for a Raspberry Pi. The frontend is inside the binary;
+there is nothing else to install.
+
+```bash
+tar xzf mqttview_0.1.0_linux_amd64.tar.gz
+./mqttview_0.1.0_linux_amd64/mqttview -addr 127.0.0.1:8114
+```
+
+`SHA256SUMS` is signed with cosign, keyless, by the workflow that built it:
+
+```bash
+cosign verify-blob SHA256SUMS \
+  --bundle SHA256SUMS.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/dgprivate/mqttview/.github/workflows/release.yml@.+' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+sha256sum -c SHA256SUMS --ignore-missing
+```
+
 ### From source
 
 ```bash
