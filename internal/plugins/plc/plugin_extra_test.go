@@ -86,10 +86,15 @@ func TestTheEdgeLogCanBeFilteredWhileWaiting(t *testing.T) {
 	apply(t, p.registry, "plc/digital/input/1", `{"address":1,"name":"DI-1-1","value":false}`)
 	apply(t, p.registry, "plc/digital/input/2", `{"address":2,"name":"DI-1-2","value":false}`)
 
-	go func() {
-		time.Sleep(200 * time.Millisecond)
-		apply(t, p.registry, "plc/digital/input/1", `{"address":1,"name":"DI-1-1","value":true}`)
-	}()
+	// The edge is applied before the poll starts, not from a goroutine racing
+	// it. A sleep here reads as "give the poll time to block", but on a slow
+	// machine the poll returns first and the test passes having proved
+	// nothing — which is how this stopped covering applyPoint in CI while
+	// staying green.
+	//
+	// The journal keeps what it was told, so an edge that already happened is
+	// still returned to a poll that asks from before it.
+	apply(t, p.registry, "plc/digital/input/1", `{"address":1,"name":"DI-1-1","value":true}`)
 
 	var out struct {
 		Edges []Edge `json:"edges"`

@@ -1,9 +1,16 @@
 # mqttview
 
-[![CI](https://github.com/dgprivate/mqttview/actions/workflows/ci.yml/badge.svg)](https://github.com/dgprivate/mqttview/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/dgprivate/mqttview/actions/workflows/codeql.yml/badge.svg)](https://github.com/dgprivate/mqttview/actions/workflows/codeql.yml)
-[![Trivy](https://github.com/dgprivate/mqttview/actions/workflows/trivy.yml/badge.svg)](https://github.com/dgprivate/mqttview/actions/workflows/trivy.yml)
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/dgprivate/mqttview/badge)](https://scorecard.dev/viewer/?uri=github.com/dgprivate/mqttview)
+[![CI](https://github.com/dgprivate/mqttview/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dgprivate/mqttview/actions/workflows/ci.yml)
+[![publish image](https://github.com/dgprivate/mqttview/actions/workflows/publish-image.yml/badge.svg?branch=main)](https://github.com/dgprivate/mqttview/actions/workflows/publish-image.yml)
+[![codecov](https://codecov.io/github/dgprivate/mqttview/branch/main/graph/badge.svg)](https://app.codecov.io/github/dgprivate/mqttview)
+[![CodeQL](https://github.com/dgprivate/mqttview/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/dgprivate/mqttview/actions/workflows/codeql.yml)
+[![Trivy](https://github.com/dgprivate/mqttview/actions/workflows/trivy.yml/badge.svg?branch=main)](https://github.com/dgprivate/mqttview/actions/workflows/trivy.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/dgprivate/mqttview/badge)](https://scorecard.dev/viewer/?uri=github.com/dgprivate/mqttview)
+[![Docker Hub](https://img.shields.io/docker/v/hausbit/mqttview?sort=semver&label=Docker%20Hub)](https://hub.docker.com/r/hausbit/mqttview)
+[![image size](https://img.shields.io/docker/image-size/hausbit/mqttview/latest)](https://hub.docker.com/r/hausbit/mqttview/tags)
+[![pulls](https://img.shields.io/docker/pulls/hausbit/mqttview)](https://hub.docker.com/r/hausbit/mqttview)
+[![Go](https://img.shields.io/badge/go-1.26-blue)](https://github.com/dgprivate/mqttview/blob/main/go.mod)
+[![License MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/dgprivate/mqttview/blob/main/LICENSE)
 
 A realtime web UI for MQTT brokers — every protocol version, every transport,
 proper authentication, and a plugin system that can turn raw topics into
