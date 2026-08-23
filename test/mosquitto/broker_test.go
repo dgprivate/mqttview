@@ -28,6 +28,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -55,12 +56,157 @@ func mosquittoPath(t *testing.T) string {
 	return ""
 }
 
+// --------------------------------------------------------------------------
+// Which brokers the matrix runs against
+// --------------------------------------------------------------------------
+
+// One version is not a compatibility test. A broker people run is whatever
+// their distribution shipped or their compose file pinned, and 2.0 and 2.1 are
+// years apart: config directives have come and gone, and 2.1 rewrote the
+// WebSocket support so it no longer needs libwebsockets. Everything in this
+// package runs against each of these.
+//
+// Set MQTTVIEW_MOSQUITTO_IMAGES to change the list without editing this —
+// comma-separated image references, or empty to test only the local broker.
+var defaultImages = []string{
+	"eclipse-mosquitto:2.0.22",
+	// The 2.1 line publishes no plain tag; -alpine is the only one there is.
+	"eclipse-mosquitto:2.1.2-alpine",
+}
+
+// startFunc starts a broker configured for one mode. Tests receive one per
+// version rather than calling a package-level function, so a version cannot
+// leak from one subtest into another.
+type startFunc func(*testing.T, config) *broker
+
+// runner knows how to run one version of Mosquitto.
+type runner struct {
+	name string
+	// command runs mosquitto with a config file, both inside dir.
+	command func(t *testing.T, dir, conf string) *exec.Cmd
+	// cleanup runs after the process is killed, for anything the process
+	// itself does not take with it.
+	cleanup func()
+	// version is what the broker should report on startup, or empty for the
+	// local one, whose version is whatever the machine has.
+	version string
+}
+
+// eachBroker runs fn once per broker version, as a subtest named after it.
+func eachBroker(t *testing.T, fn func(t *testing.T, start startFunc)) {
+	t.Helper()
+	for _, r := range runners(t) {
+		t.Run(r.name, func(t *testing.T) {
+			fn(t, func(t *testing.T, cfg config) *broker {
+				return startWith(t, r, cfg)
+			})
+		})
+	}
+}
+
+func runners(t *testing.T) []runner {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("this package starts a real broker")
+	}
+
+	out := []runner{{
+		name: "local",
+		command: func(t *testing.T, _, conf string) *exec.Cmd {
+			return exec.Command(mosquittoPath(t), "-c", conf, "-v")
+		},
+	}}
+
+	images := defaultImages
+	if v, ok := os.LookupEnv("MQTTVIEW_MOSQUITTO_IMAGES"); ok {
+		images = nil
+		for _, image := range strings.Split(v, ",") {
+			if image = strings.TrimSpace(image); image != "" {
+				images = append(images, image)
+			}
+		}
+	}
+	for _, image := range images {
+		out = append(out, dockerRunner(t, image))
+	}
+	return out
+}
+
+var (
+	dockerOnce sync.Once
+	dockerOK   bool
+	pulled     sync.Map // image → error from the pull
+)
+
+// dockerRunner runs a published Mosquitto image. Host networking and the
+// temporary directory bind-mounted at the same path, so a config file naming
+// /tmp/xxx/server.crt means the same thing on both sides and the tests do not
+// have to know they are talking to a container.
+func dockerRunner(t *testing.T, image string) runner {
+	t.Helper()
+	version := image
+	if _, tag, ok := strings.Cut(image, ":"); ok {
+		version = strings.TrimSuffix(tag, "-alpine")
+	}
+
+	return runner{
+		name:    version,
+		version: version,
+		command: func(t *testing.T, dir, conf string) *exec.Cmd {
+			requireDocker(t)
+			pullOnce(t, image)
+
+			name := fmt.Sprintf("mqttview-test-%d-%s", os.Getpid(), filepath.Base(dir))
+			// Killing `docker run` kills the client, not the container, so it
+			// is removed by name afterwards. --rm alone only covers a
+			// container that exited on its own.
+			t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", name).Run() })
+			// --user: the image runs as its own mosquitto user, which cannot
+			// read a directory created by testing.T. Mosquitto needs no
+			// privileges here, so it runs as whoever runs the test.
+			return exec.Command("docker", "run", "--rm", "--name", name,
+				"--network", "host",
+				"--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
+				"-v", dir+":"+dir,
+				image, "mosquitto", "-c", conf, "-v")
+		},
+	}
+}
+
+func requireDocker(t *testing.T) {
+	t.Helper()
+	dockerOnce.Do(func() {
+		cmd := exec.Command("docker", "version", "--format", "{{.Server.Version}}")
+		dockerOK = cmd.Run() == nil
+	})
+	if !dockerOK {
+		t.Skip("docker is not available, so other Mosquitto versions cannot be run")
+	}
+}
+
+// pullOnce fetches an image once per run. Without it every test pulls, and the
+// first assertion in a suite becomes "is the network fast today".
+func pullOnce(t *testing.T, image string) {
+	t.Helper()
+	v, _ := pulled.LoadOrStore(image, sync.OnceValue(func() error {
+		cmd := exec.Command("docker", "pull", "--quiet", image)
+		if raw, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("docker pull %s: %w\n%s", image, err, raw)
+		}
+		return nil
+	}))
+	if err := v.(func() error)(); err != nil {
+		t.Skipf("%v", err)
+	}
+}
+
 // broker is one running Mosquitto, configured for one mode.
 type broker struct {
-	port int
-	dir  string
-	log  *lockedBuffer
-	cmd  *exec.Cmd
+	port    int
+	dir     string
+	log     *lockedBuffer
+	cmd     *exec.Cmd
+	version string // what it reported on startup
 }
 
 // config describes what to write into mosquitto.conf. Every field maps to one
@@ -189,12 +335,17 @@ func issue(ca *x509.Certificate, caKey *ecdsa.PrivateKey, cn string, dns []strin
 		string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})), nil
 }
 
-// start writes a mosquitto.conf for the mode and runs the daemon on a free
-// port until the test ends.
-func start(t *testing.T, cfg config) *broker {
+// startWith writes a mosquitto.conf for the mode and runs one version of the
+// daemon on a free port until the test ends.
+func startWith(t *testing.T, r runner, cfg config) *broker {
 	t.Helper()
-	bin := mosquittoPath(t)
+	// The directory is bind-mounted into a container for the image runners,
+	// and 0700 from testing.T is not enough for the process inside it to walk
+	// into. Throwaway certificates in /tmp are not a secret being spilled.
 	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	port := freePort(t)
 
 	var conf strings.Builder
@@ -245,24 +396,51 @@ func start(t *testing.T, cfg config) *broker {
 	write(t, confPath, conf.String())
 
 	out := &lockedBuffer{}
-	cmd := exec.Command(bin, "-c", confPath, "-v")
+	cmd := r.command(t, dir, confPath)
 	cmd.Stdout = out
 	cmd.Stderr = out
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
 
-	b := &broker{port: port, dir: dir, log: out, cmd: cmd}
+	b := &broker{port: port, dir: dir, log: out, cmd: cmd, version: r.version}
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
+		if r.cleanup != nil {
+			r.cleanup()
+		}
 		if t.Failed() {
 			t.Logf("mosquitto.conf:\n%s\nbroker log:\n%s", conf.String(), out.String())
 		}
 	})
 
 	b.waitUntilListening(t, cfg)
+	b.checkVersion(t)
 	return b
+}
+
+// checkVersion reads the version out of the startup banner. Without it a
+// matrix that silently ran one broker three times would look like broad
+// coverage: an image tag can be wrong, and a runner can hand back something
+// cached under a name that no longer means what it says.
+func (b *broker) checkVersion(t *testing.T) {
+	t.Helper()
+	banner := regexp.MustCompile(`mosquitto version (\S+)`)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if m := banner.FindStringSubmatch(b.log.String()); m != nil {
+			if b.version != "" && m[1] != b.version {
+				t.Fatalf("asked for Mosquitto %s and got %s", b.version, m[1])
+			}
+			b.version = m[1]
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the broker never said which version it is:\n%s", b.log.String())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func (b *broker) waitUntilListening(t *testing.T, cfg config) {

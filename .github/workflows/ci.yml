@@ -50,12 +50,19 @@ jobs:
       # Installed rather than skipped. test/mosquitto skips itself when the
       # broker is missing, which on a runner would mean a green build that
       # checked none of the transports.
+      #
+      # The suite also runs its matrix against published images — one broker
+      # version is not a compatibility test, and 2.1 rejected something 2.0
+      # accepted the day the matrix was added. Pulled here so a slow registry
+      # shows up as a slow step rather than as a flaky test.
       - name: Install Mosquitto
         run: |
           sudo apt-get update
           sudo apt-get install -y mosquitto mosquitto-clients
           sudo systemctl stop mosquitto || true
           sudo systemctl disable mosquitto || true
+          docker pull --quiet eclipse-mosquitto:2.0.22
+          docker pull --quiet eclipse-mosquitto:2.1.2-alpine
 
       # The end-to-end suites: the app's start script and the real binary
       # (test/homeassistant), and every transport against a real broker

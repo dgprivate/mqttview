@@ -84,6 +84,12 @@ can reach:
   reconnects testable at all: the client API has no way to vanish, and killing
   the broker breaks both ends at once.
 
+  It runs the whole matrix against **several broker versions**: whatever is
+  installed locally, plus the images in `defaultImages` (2.0.22 and 2.1.2 at
+  the time of writing), overridable with `MQTTVIEW_MOSQUITTO_IMAGES`. One
+  version is not a compatibility test — 2.1 rejected something 2.0 accepted
+  within a day of the matrix existing.
+
 They found four real defects the day they were written, including an app option
 that had never worked. If you change `run.sh`, a manifest, the client or the
 ingress path, these are the tests that will tell you.
@@ -176,6 +182,14 @@ wraps `goxmldsig`, and a mistake in signature handling over canonicalised XML
 is a silent authentication bypass, not a visible bug. Keep both dependencies
 current: govulncheck caught a signature-bypass advisory in goxmldsig within
 minutes of it being added here, and that is the whole reason the job exists.
+
+**MQTT 5 over WebSockets is dialled by us, not by autopaho.** `internal/mqttc/websocket_v5.go`
+exists because the library writes a packet in several pieces and one of them,
+the empty property section of a SUBSCRIBE, becomes a zero-length WebSocket
+frame. Mosquitto 2.1 treats that as the end of the packet and disconnects the
+client as malformed; 2.0 does not. The frame is legal and pointless, so
+mqttview does not send it. Do not replace the dialer with the library's
+without checking `TestWebSockets` against 2.1.
 
 **Never guess at a protocol.** The PLC command schema came from reading the
 command processor's source on the Beckhoff PLC that publishes it, not from a

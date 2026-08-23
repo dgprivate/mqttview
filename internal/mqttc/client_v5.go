@@ -69,7 +69,10 @@ func newV5Client(spec ConnectionSpec, tlsCfg *tls.Config, events Events) (*v5Cli
 	}
 
 	cfg := autopaho.ClientConfig{
-		ServerUrls:                    []*url.URL{u},
+		ServerUrls: []*url.URL{u},
+		// mqttview dials, so that a WebSocket connection never carries an
+		// empty frame; see websocket_v5.go for what that costs and why.
+		AttemptConnection:             tlsDial,
 		TlsCfg:                        tlsCfg,
 		KeepAlive:                     uint16(spec.KeepAlive),
 		CleanStartOnInitialConnection: spec.CleanStart,
