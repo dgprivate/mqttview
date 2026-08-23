@@ -24,6 +24,10 @@ on:
     # Both linters change under us, so a weekly run finds a break before a
     # release does.
     - cron: '0 5 * * 1'
+  # Runnable by hand: the path filters above mean a change to the Go server
+  # does not trigger this, and a release still wants to know both linters are
+  # happy before anybody tries to install it.
+  workflow_dispatch:
 
 permissions:
   contents: read
