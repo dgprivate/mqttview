@@ -26,7 +26,7 @@ import (
 func connectedBroker(t *testing.T, ts *testServer) (id, url string) {
 	t.Helper()
 
-	broker := testutil.StartBroker(t)
+	broker := ts.startBroker(t)
 	var created struct {
 		ID string `json:"id"`
 	}
@@ -43,17 +43,11 @@ func connectedBroker(t *testing.T, ts *testServer) (id, url string) {
 func waitForTopic(t *testing.T, ts *testServer, connID, topic string) {
 	t.Helper()
 
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	testutil.WaitFor(t, 10*time.Second, "the topic to reach the derived tree", func() bool {
 		resp := ts.do(http.MethodGet, "/api/connections/"+connID+"/topic?topic="+topic, nil)
-		status := resp.StatusCode
-		resp.Body.Close()
-		if status == http.StatusOK {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	t.Fatalf("topic %q never arrived", topic)
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	})
 }
 
 func TestHealthIsPublic(t *testing.T) {

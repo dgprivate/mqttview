@@ -194,6 +194,21 @@ func (ts *testServer) login() {
 	}
 }
 
+// startBroker starts a test broker for this server, and makes sure the
+// server's MQTT manager is shut down before the broker goes.
+//
+// Cleanups run last-registered-first, so registering the shutdown after the
+// broker's own cleanup is what orders them. Without it the broker is torn down
+// while a client still holds a session on it — which is a data race inside the
+// broker, and then a client reconnecting to a dead port for as long as the
+// test binary will let it. That combination hung CI for five minutes.
+func (ts *testServer) startBroker(t *testing.T) *testutil.Broker {
+	t.Helper()
+	broker := testutil.StartBroker(t)
+	t.Cleanup(func() { ts.mqtt.Shutdown(newContext()) })
+	return broker
+}
+
 // status makes a request and returns only its code, for the many checks whose
 // whole point is which status was chosen.
 func (ts *testServer) status(method, path string, body any) int {
@@ -266,8 +281,8 @@ func TestCSRFIsRequiredForWrites(t *testing.T) {
 // create a broker connection, connect, publish, and read it back out of the
 // topic tree.
 func TestConnectionLifecycle(t *testing.T) {
-	broker := testutil.StartBroker(t)
 	ts := newTestServer(t)
+	broker := ts.startBroker(t)
 	ts.login()
 
 	var created struct {
@@ -357,8 +372,8 @@ func TestConnectionLifecycle(t *testing.T) {
 // discovery payload, and checks that a device with a live value comes back out
 // of the plugin's own API.
 func TestHomeAssistantPluginEndToEnd(t *testing.T) {
-	broker := testutil.StartBroker(t)
 	ts := newTestServer(t)
+	broker := ts.startBroker(t)
 	ts.login()
 
 	var created struct {
