@@ -253,13 +253,19 @@ func TestAutoConnectRetriesUntilItIsToldToStop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.StartAutoConnect(ctx)
 
-	// The supervisor records the intent on its first attempt, whether or not
-	// the attempt succeeds.
-	testutil.WaitFor(t, 10*time.Second, "the supervisor to make its first attempt", func() bool {
-		return c.wantsConnection()
+	// Waiting on the state rather than on the intent. The intent is recorded
+	// when the attempt starts and the state when it fails, so waiting for the
+	// first and asserting the second is a race the test lost about once in
+	// fifty shuffled runs — it caught the supervisor mid-dial, in
+	// "connecting", which is not a bug in anything but the assertion.
+	testutil.WaitFor(t, 10*time.Second, "the first attempt to fail", func() bool {
+		return c.Status().State == StateError
 	})
-	if st := c.Status(); st.State != StateError {
-		t.Errorf("state = %q, want error", st.State)
+	if !c.wantsConnection() {
+		t.Error("the supervisor gave up wanting the connection after one refusal")
+	}
+	if st := c.Status(); !strings.Contains(st.LastError, "127.0.0.1:1") {
+		t.Errorf("the recorded error does not name what was unreachable: %q", st.LastError)
 	}
 
 	// Cancelling the context is how shutdown stops it — and Shutdown waits for
