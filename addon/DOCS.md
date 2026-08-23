@@ -110,6 +110,36 @@ mqtt_password: a-password
 `#`, and you can change all of it in mqttview afterwards — this only ever adds
 a connection that is not there, and never touches one you have edited.
 
+For a broker that wants a **client certificate**, put the files in this app's
+configuration folder and name them:
+
+```yaml
+mqtt_url: mqtts://mqtt.example.com:8883
+mqtt_username: someone
+mqtt_password: a-password
+mqtt_ca_file: /config/ca.crt
+mqtt_client_cert_file: /config/client.crt
+mqtt_client_key_file: /config/client.key
+mqtt_server_name: mqtt.example.com     # if the certificate names something else
+```
+
+mqttview reads them once at start and stores the contents encrypted, so the
+paths only have to be right the first time. A file it cannot read stops the
+start with the name of the setting, rather than creating a connection that
+would fail at the handshake — or, worse, one that connects unverified.
+
+### Can it not just read the MQTT integration's settings?
+
+Not through anything supported. The Supervisor only knows about brokers an app
+provides, and Home Assistant's API strips credentials out of a config entry
+before returning it.
+
+They are readable on disk, in `.storage`, by an app that maps the Home
+Assistant configuration folder — but that mapping is not "read the MQTT
+settings", it is read access to `secrets.yaml` and every other integration's
+credentials, in exchange for saving one form. `.storage` is also an internal
+format with no compatibility promise. mqttview does not ask for it.
+
 ### `import_mqtt`
 
 On by default. Asks Home Assistant for the broker it already uses, when

@@ -200,6 +200,26 @@ type ConnectionSeed struct {
 	// InsecureSkipVerify accepts any TLS certificate. For a home broker with a
 	// self-signed one; it is a real hole and is named so it reads like one.
 	InsecureSkipVerify bool `yaml:"insecure_skip_verify"`
+	// ServerName overrides the name checked against the certificate, for a
+	// broker reached at an address its certificate does not mention.
+	ServerName string `yaml:"server_name"`
+
+	// TLS material, either inline or as a path to read it from.
+	//
+	// Both exist because both are the natural thing somewhere: a PEM block
+	// pastes into a config file, and a path is what works when the file is
+	// mounted — which is the only practical option inside a Home Assistant app,
+	// where configuration is a form rather than a file.
+	//
+	// A path wins over the inline value if both are set, and a path that cannot
+	// be read is an error rather than a connection quietly created without the
+	// certificate it was told to use.
+	CAPEM          string `yaml:"ca_pem"`
+	CAFile         string `yaml:"ca_file"`
+	ClientCertPEM  string `yaml:"client_cert_pem"`
+	ClientCertFile string `yaml:"client_cert_file"`
+	ClientKeyPEM   string `yaml:"client_key_pem"`
+	ClientKeyFile  string `yaml:"client_key_file"`
 }
 
 // Wanted reports whether this connection should be dialled on boot.

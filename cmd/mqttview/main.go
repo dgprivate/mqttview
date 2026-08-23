@@ -301,6 +301,15 @@ func seedConnections(ctx context.Context, db *store.Store, mgr *mqttc.Manager,
 			subs = append(subs, mqttc.Subscription{Filter: f})
 		}
 
+		tls, err := seedTLS(seed)
+		if err != nil {
+			// Not skipped like a malformed URL: somebody named a certificate
+			// and it is not there. Creating the connection without it would
+			// either fail at the broker with a confusing error or, worse,
+			// connect to something unverified.
+			return fmt.Errorf("connection %q: %w", name, err)
+		}
+
 		spec := mqttc.ConnectionSpec{
 			ID:            uuid.NewString(),
 			Name:          name,
@@ -310,7 +319,7 @@ func seedConnections(ctx context.Context, db *store.Store, mgr *mqttc.Manager,
 			Password:      seed.Password,
 			Subscriptions: subs,
 			AutoConnect:   seed.Wanted(),
-			TLS:           mqttc.TLSSpec{InsecureSkipVerify: seed.InsecureSkipVerify},
+			TLS:           tls,
 		}
 		if err := spec.Normalize(); err != nil {
 			log.Error("skipping a declared connection", "name", name, "error", err)
@@ -326,6 +335,51 @@ func seedConnections(ctx context.Context, db *store.Store, mgr *mqttc.Manager,
 		log.Info("created a connection from configuration", "name", name, "url", spec.URL)
 	}
 	return nil
+}
+
+// seedTLS resolves the TLS material a declared connection asks for.
+//
+// A path wins over an inline value: inside a Home Assistant app the
+// configuration is a form, so a certificate arrives as a file in a mapped
+// folder and the option names the path. Elsewhere a PEM block in the config
+// file is the natural thing. Both are read here so neither place has to be the
+// odd one out.
+func seedTLS(seed config.ConnectionSeed) (mqttc.TLSSpec, error) {
+	tls := mqttc.TLSSpec{
+		InsecureSkipVerify: seed.InsecureSkipVerify,
+		ServerName:         seed.ServerName,
+		CAPEM:              seed.CAPEM,
+		ClientCertPEM:      seed.ClientCertPEM,
+		ClientKeyPEM:       seed.ClientKeyPEM,
+	}
+
+	for _, f := range []struct {
+		path string
+		into *string
+		what string
+	}{
+		{seed.CAFile, &tls.CAPEM, "ca_file"},
+		{seed.ClientCertFile, &tls.ClientCertPEM, "client_cert_file"},
+		{seed.ClientKeyFile, &tls.ClientKeyPEM, "client_key_file"},
+	} {
+		if f.path == "" {
+			continue
+		}
+		raw, err := os.ReadFile(f.path)
+		if err != nil {
+			return mqttc.TLSSpec{}, fmt.Errorf("%s: %w", f.what, err)
+		}
+		*f.into = string(raw)
+	}
+
+	// A certificate without its key, or the other way round, is a mutual-TLS
+	// setup that will fail at the handshake with something unhelpful. Say it
+	// here, where the two are visible together.
+	if (tls.ClientCertPEM == "") != (tls.ClientKeyPEM == "") {
+		return mqttc.TLSSpec{}, errors.New(
+			"a client certificate needs its key and a key needs its certificate")
+	}
+	return tls, nil
 }
 
 // pluginDefaults converts the config file's plugin section into the runtime's

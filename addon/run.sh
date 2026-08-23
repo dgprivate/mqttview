@@ -46,6 +46,7 @@ mqtt_connection() {
         # Named after the host rather than "Home Assistant": this one is not
         # Home Assistant's, and a list of brokers wants to say which is which.
         emit_connection "${url}" "${user}" "${pass}" "$(broker_name "${url}")"
+        emit_tls
         return 0
     fi
 
@@ -87,6 +88,36 @@ mqtt_connection() {
     fi
 
     say "bashio is missing, so not asking about MQTT"
+}
+
+# emit_tls adds the TLS block, for a broker that wants a client certificate.
+#
+# The files are named rather than copied: mqttview reads them at startup and
+# stores the contents encrypted, so the paths only have to be right once.
+emit_tls() {
+    local ca cert key server insecure
+    ca="$(option mqtt_ca_file)"
+    cert="$(option mqtt_client_cert_file)"
+    key="$(option mqtt_client_key_file)"
+    server="$(option mqtt_server_name)"
+    insecure="$(option mqtt_insecure)"
+
+    [ -n "${ca}${cert}${key}${server}" ] || [ "${insecure}" = "true" ] || return 0
+
+    for f in "${ca}" "${cert}" "${key}"; do
+        [ -z "${f}" ] && continue
+        [ -r "${f}" ] || say "warning: ${f} cannot be read; mqttview will say so and stop"
+    done
+
+    [ -n "${ca}" ] && echo "    ca_file: ${ca}"
+    [ -n "${cert}" ] && echo "    client_cert_file: ${cert}"
+    [ -n "${key}" ] && echo "    client_key_file: ${key}"
+    [ -n "${server}" ] && echo "    server_name: ${server}"
+    [ "${insecure}" = "true" ] && {
+        say "warning: mqtt_insecure accepts any certificate for ${url:-the broker}"
+        echo "    insecure_skip_verify: true"
+    }
+    return 0
 }
 
 # broker_name is the host out of a URL, which is what a person calls a broker.

@@ -20,6 +20,7 @@ import (
 	"github.com/dgprivate/mqttview/internal/mqttc"
 	"github.com/dgprivate/mqttview/internal/secrets"
 	"github.com/dgprivate/mqttview/internal/store"
+	"github.com/dgprivate/mqttview/internal/testutil"
 )
 
 func testStore(t *testing.T) *store.Store {
@@ -533,4 +534,107 @@ func seedHarness(t *testing.T) (*store.Store, *mqttc.Manager, *slog.Logger) {
 	t.Cleanup(func() { mgr.Shutdown(context.Background()) })
 
 	return db, mgr, slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// A declared connection can carry mutual TLS, because plenty of brokers want a
+// client certificate and an app's configuration is a form rather than a file —
+// so the certificate arrives as a path, not as a pasted PEM block.
+
+func TestADeclaredConnectionCarriesItsCertificates(t *testing.T) {
+	dir := t.TempDir()
+	cert, key, err := testutil.SelfSignedPEM("broker.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	caPath := filepath.Join(dir, "ca.crt")
+	certPath := filepath.Join(dir, "client.crt")
+	keyPath := filepath.Join(dir, "client.key")
+	for path, content := range map[string]string{caPath: cert, certPath: cert, keyPath: key} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	db, mgr, log := seedHarness(t)
+	seeds := []config.ConnectionSeed{{
+		Name: "secured", URL: "mqtts://broker.example.com:8883",
+		CAFile: caPath, ClientCertFile: certPath, ClientKeyFile: keyPath,
+		ServerName: "broker.example.com",
+	}}
+	if err := seedConnections(context.Background(), db, mgr, seeds, log); err != nil {
+		t.Fatalf("seeding: %v", err)
+	}
+
+	stored, err := db.ListConnections()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 1 {
+		t.Fatalf("stored %d connections", len(stored))
+	}
+	got := stored[0].Spec.TLS
+	if got.CAPEM != cert || got.ClientCertPEM != cert || got.ClientKeyPEM != key {
+		t.Error("the certificate files were not read into the connection")
+	}
+	if got.ServerName != "broker.example.com" {
+		t.Errorf("server name = %q", got.ServerName)
+	}
+	// The private key is a credential and the store encrypts it; what comes
+	// back out is what went in, which is the property that matters here.
+	if !strings.Contains(got.ClientKeyPEM, "PRIVATE KEY") {
+		t.Errorf("the key does not look like a key: %.40q", got.ClientKeyPEM)
+	}
+}
+
+func TestANamedCertificateThatIsNotThereStopsTheBoot(t *testing.T) {
+	db, mgr, log := seedHarness(t)
+
+	// Not skipped like a malformed URL. Somebody named a certificate: creating
+	// the connection without it would either fail at the broker with something
+	// unhelpful or, worse, connect to a broker nothing verified.
+	seeds := []config.ConnectionSeed{{
+		Name: "secured", URL: "mqtts://broker:8883",
+		CAFile: "/no/such/ca.crt",
+	}}
+	err := seedConnections(context.Background(), db, mgr, seeds, log)
+	if err == nil {
+		t.Fatal("a missing certificate was ignored")
+	}
+	if !strings.Contains(err.Error(), "ca_file") {
+		t.Errorf("error %q does not name the setting", err)
+	}
+}
+
+func TestHalfOfAClientCertificateIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	cert, key, err := testutil.SelfSignedPEM("broker.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPath := filepath.Join(dir, "client.crt")
+	keyPath := filepath.Join(dir, "client.key")
+	if err := os.WriteFile(certPath, []byte(cert), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, []byte(key), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A certificate without its key fails at the handshake with something that
+	// does not mention either. Saying it here, where the two are visible
+	// together, is the difference between a fixable message and a puzzle.
+	for name, seed := range map[string]config.ConnectionSeed{
+		"cert without key": {Name: "a", URL: "mqtts://b:8883", ClientCertFile: certPath},
+		"key without cert": {Name: "a", URL: "mqtts://b:8883", ClientKeyFile: keyPath},
+	} {
+		db, mgr, log := seedHarness(t)
+		err := seedConnections(context.Background(), db, mgr, []config.ConnectionSeed{seed}, log)
+		if err == nil {
+			t.Errorf("%s was accepted", name)
+			continue
+		}
+		if !strings.Contains(err.Error(), "needs its") {
+			t.Errorf("%s: error %q does not explain what is missing", name, err)
+		}
+	}
 }
