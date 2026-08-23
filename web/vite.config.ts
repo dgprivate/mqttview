@@ -5,6 +5,10 @@ import react from '@vitejs/plugin-react'
 // WebSocket traffic to the Go server, so cookies stay same-origin.
 export default defineConfig({
   plugins: [react()],
+  // Relative asset URLs, so the bundle works both at the root and under the
+  // prefix Home Assistant ingress serves the panel at. Absolute "/assets/..."
+  // URLs would escape the prefix and 404.
+  base: './',
   server: {
     host: '127.0.0.1',
     port: 5173,

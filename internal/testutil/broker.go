@@ -48,10 +48,43 @@ func StartBroker(t *testing.T) *Broker {
 			t.Logf("testutil: broker stopped: %v", err)
 		}
 	}()
-	t.Cleanup(func() { _ = server.Close() })
+	t.Cleanup(func() { stopBroker(t, server) })
 
 	waitForListener(t, addr)
 	return &Broker{URL: "tcp://" + addr, Server: server}
+}
+
+// stopBroker shuts the broker down.
+//
+// Clients are disconnected first. Server.Close does that itself, but only
+// after taking the listeners down, and the listener teardown waits on a
+// WaitGroup that an attached client keeps held — so a test that leaves a
+// client connected hangs there rather than failing.
+//
+// This used to be the site of an intermittent data race, and closing in a
+// different order only moved it. The actual cause was elsewhere: a manager
+// whose auto-connect loop was still dialling after Shutdown returned, landing
+// on a port that FreePort had since handed to another test's broker. Manager
+// now waits for those loops, and this is an ordinary close again.
+func stopBroker(t *testing.T, server *mqtt.Server) {
+	t.Helper()
+
+	// Order matters, and each step is here because leaving it out breaks
+	// something specific:
+	//
+	//  1. Stop the clients. The listener teardown waits on a WaitGroup an
+	//     attached client holds, so skipping this hangs instead of failing.
+	//  2. Close the listeners, and wait for their accept loops to return.
+	//     After this nothing can be in EstablishConnection.
+	//  3. Only then Close the server, which writes the field that
+	//     EstablishConnection reads without synchronisation. Doing it while an
+	//     accept was in flight is a data race the detector catches about one
+	//     run in ten, reported against whichever test was running at the time.
+	for _, cl := range server.Clients.GetAll() {
+		cl.Stop(errors.New("testutil: broker stopping"))
+	}
+	server.Listeners.CloseAll(func(string) {})
+	_ = server.Close()
 }
 
 // Publish sends a message straight from the broker, which is the easiest way
@@ -85,18 +118,27 @@ func FreePort(t *testing.T) int {
 	return l.Addr().(*net.TCPAddr).Port
 }
 
+// waitForListener blocks until the broker has bound its port.
+//
+// It proves that by failing to bind the port itself, rather than by dialling
+// it. Dialling looks more natural and is what this used to do, but it hands
+// the broker a connection to establish and immediately tear down — and a test
+// that finishes quickly then closes the broker while that connection is still
+// being established, which is a data race inside mochi and cost a long evening
+// to track down. The probe that does not connect cannot cause it.
 func waitForListener(t *testing.T, addr string) {
 	t.Helper()
+
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
-		if err == nil {
-			_ = conn.Close()
-			return
+		l, err := net.Listen("tcp", addr)
+		if err != nil {
+			return // already bound, which is what we are waiting for
 		}
+		_ = l.Close()
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("testutil: broker at %s did not start", addr)
+	t.Fatalf("testutil: broker at %s did not bind its port", addr)
 }
 
 // SelfSignedPEM returns a self-signed certificate and its private key, both

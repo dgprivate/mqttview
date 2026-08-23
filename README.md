@@ -179,6 +179,29 @@ and survive restarts with their credentials decrypted from the data volume.
 Plugins see every connection: the Home Assistant device list can span all of
 them or filter to one.
 
+## Home Assistant
+
+mqttview installs as a **Home Assistant add-on** with a sidebar panel and no
+login of its own: under ingress, Home Assistant has already decided you may
+open the panel, and asking for a second password would be one more credential
+to lose rather than one more lock.
+
+Settings → Add-ons → Add-on Store → ⋮ → Repositories → add
+`https://github.com/mqttview/mqttview`, then install **mqttview**.
+
+No port is published, and mqttview refuses any request that did not come
+through the Supervisor — that check is what makes the identity headers worth
+anything.
+
+Running Home Assistant **Container** or **Core**? Those have no add-ons at all.
+Run mqttview standalone and add the sidebar link with the HACS integration in
+this repository; mqttview keeps its own sign-in there, because nothing has
+authenticated you on its behalf. Note that HACS installs integrations and
+cards, not add-ons — the two paths are separate on purpose.
+
+**[docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md)** explains which path fits
+your install, how the no-login mode works, and what it rests on.
+
 ## Quick start with Docker Compose
 
 ```bash
@@ -228,6 +251,9 @@ docker run -d -p 127.0.0.1:8114:8114 \
 make build            # frontend into web/dist, then the binary that embeds it
 ./mqttview -addr 127.0.0.1:8114
 ```
+
+`./mqttview -check-config` reports what a config file resolves to, including
+everything the environment overrode, without starting anything.
 
 ## Configuration
 

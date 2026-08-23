@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { socketURL } from '../api/base'
 import type { Message, Status } from '../api/types'
 
 export interface Frame {
@@ -28,8 +29,7 @@ class LiveSocket {
     }
     this.closedByUs = false
 
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const socket = new WebSocket(`${proto}//${window.location.host}/api/ws`)
+    const socket = new WebSocket(socketURL())
     this.socket = socket
 
     socket.onopen = () => {

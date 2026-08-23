@@ -14,6 +14,8 @@ export function Account() {
 
   if (!user) return null
   const ssoOnly = user.provider !== 'local'
+  // The stored id is "homeassistant"; nobody writes it that way.
+  const providerName = user.provider === 'homeassistant' ? 'Home Assistant' : user.provider
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
@@ -42,7 +44,7 @@ export function Account() {
         <div>
           <h1>Your account</h1>
           <p className="subtitle">
-            {user.email} · role {user.role} · signed in with {user.provider} · last seen{' '}
+            {user.email} · role {user.role} · signed in with {providerName} · last seen{' '}
             {formatRelative(user.lastLoginAt)}
           </p>
         </div>
@@ -55,7 +57,7 @@ export function Account() {
 
         {ssoOnly ? (
           <Alert kind="info">
-            This account signs in through {user.provider}, so its password is managed there.
+            This account signs in through {providerName}, so its password is managed there.
           </Alert>
         ) : (
           <>

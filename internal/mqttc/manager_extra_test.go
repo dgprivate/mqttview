@@ -2,6 +2,7 @@ package mqttc
 
 import (
 	"context"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -281,5 +282,74 @@ func TestStartAutoConnectSkipsWhatIsNotAskedFor(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if c.wantsConnection() {
 		t.Error("a connection with autoConnect off was connected anyway")
+	}
+}
+
+// TestShutdownStopsTheRetryLoops is a regression test for a leak that took a
+// long time to find: it showed up as a data race inside the test broker,
+// attributed to whichever test happened to be running when a stray retry from
+// an earlier one landed on a reused port.
+//
+// The property is simple and worth having on its own: after Shutdown returns,
+// nothing is still trying to connect. In production that is the difference
+// between SIGTERM meaning "stopped" and meaning "asked to stop".
+func TestShutdownStopsTheRetryLoops(t *testing.T) {
+	m := NewManager(nil)
+
+	// A broker that is not there, so the supervisor keeps retrying rather than
+	// succeeding and returning on its own.
+	spec := ConnectionSpec{
+		ID: "gone", Name: "gone", URL: "mqtt://127.0.0.1:1", Version: V311,
+		AutoConnect: true,
+	}
+	if err := spec.Normalize(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Upsert(context.Background(), spec); err != nil {
+		t.Fatal(err)
+	}
+
+	before := runtime.NumGoroutine()
+	m.StartAutoConnect(context.Background())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	m.Shutdown(ctx)
+
+	// Shutdown waits, so this is a statement about what has already happened
+	// rather than a poll with a sleep in it.
+	after := runtime.NumGoroutine()
+	if after > before+2 {
+		t.Errorf("goroutines went from %d to %d across StartAutoConnect and Shutdown", before, after)
+	}
+}
+
+func TestStartingAutoConnectTwiceDoesNotDoubleUp(t *testing.T) {
+	m := NewManager(nil)
+
+	spec := ConnectionSpec{
+		ID: "gone", Name: "gone", URL: "mqtt://127.0.0.1:1", Version: V311,
+		AutoConnect: true,
+	}
+	if err := spec.Normalize(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Upsert(context.Background(), spec); err != nil {
+		t.Fatal(err)
+	}
+
+	before := runtime.NumGoroutine()
+	// Reloading the configuration calls this again. The second call has to
+	// replace the first, not run alongside it: two loops dialling the same
+	// broker halve the effective backoff every reload.
+	m.StartAutoConnect(context.Background())
+	m.StartAutoConnect(context.Background())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	m.Shutdown(ctx)
+
+	if after := runtime.NumGoroutine(); after > before+2 {
+		t.Errorf("goroutines went from %d to %d", before, after)
 	}
 }

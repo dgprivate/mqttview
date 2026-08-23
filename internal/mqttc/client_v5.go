@@ -254,6 +254,17 @@ func (c *v5Client) Disconnect(ctx context.Context) error {
 	if cancel != nil {
 		cancel()
 	}
+
+	// Wait for autopaho to actually finish. Disconnect only asks: its retry
+	// loop can still be part-way through dialling, and returning here would
+	// mean Shutdown reports the connection closed while a socket is still
+	// being opened. On SIGTERM that is a connection left half-open behind a
+	// process that has already exited.
+	select {
+	case <-cm.Done():
+	case <-ctx.Done():
+		return errors.Join(err, fmt.Errorf("mqttc: waiting for the connection to close: %w", ctx.Err()))
+	}
 	return err
 }
 

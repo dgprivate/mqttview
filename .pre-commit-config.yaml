@@ -52,3 +52,19 @@ repos:
         language: system
         files: ^web/src/.*\.(ts|tsx)$
         pass_filenames: false
+
+      # The add-on's run script is the only shell in the repository, and it is
+      # what turns Home Assistant's options into mqttview's configuration.
+      - id: shellcheck
+        name: shellcheck the add-on run script
+        entry: shellcheck
+        language: system
+        files: ^addon/.*\.sh$
+
+      # A malformed add-on manifest is only discovered when somebody tries to
+      # install it, which is the worst place to find out.
+      - id: addon-manifest
+        name: the add-on manifest parses
+        entry: python3 -c "import sys,yaml;[yaml.safe_load(open(p)) for p in sys.argv[1:]]"
+        language: system
+        files: ^addon/.*\.yaml$

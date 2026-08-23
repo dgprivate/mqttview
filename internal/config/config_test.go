@@ -435,3 +435,131 @@ func TestSSOProvidersAreValidatedBeforeTheServerStarts(t *testing.T) {
 		t.Errorf("a disabled, incomplete provider was refused: %v", err)
 	}
 }
+
+// Home Assistant mode has one property that matters more than the rest: a
+// configuration that would let anybody in must not start.
+
+func TestHomeAssistantModeRefusesToTrustEveryone(t *testing.T) {
+	cfg := Default()
+	cfg.Auth.Mode = ModeIngress
+	cfg.Auth.Ingress.TrustedProxies = nil
+
+	// With no trusted proxy, the identity headers are worth nothing: anybody
+	// who reaches the port is whoever they say they are. Starting anyway would
+	// be an unauthenticated MQTT console on the network.
+	err := cfg.validate()
+	if err == nil {
+		t.Fatal("ingress mode with no trusted proxy was accepted")
+	}
+	if !strings.Contains(err.Error(), "trusted_proxies") {
+		t.Errorf("error %q does not name the setting", err)
+	}
+}
+
+func TestHomeAssistantModeChecksWhatItWasGiven(t *testing.T) {
+	for name, mutate := range map[string]func(*Config){
+		"a proxy that is not an address": func(c *Config) {
+			c.Auth.Ingress.TrustedProxies = []string{"the supervisor"}
+		},
+		"a role that does not exist": func(c *Config) {
+			c.Auth.Ingress.DefaultRole = "superuser"
+		},
+	} {
+		cfg := Default()
+		cfg.Auth.Mode = ModeIngress
+		mutate(&cfg)
+		if err := cfg.validate(); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+
+	// A CIDR is accepted alongside a bare address, because a Supervisor on a
+	// non-default network is a range rather than one host.
+	cfg := Default()
+	cfg.Auth.Mode = ModeIngress
+	cfg.Auth.Ingress.TrustedProxies = []string{"172.30.32.0/23", "172.30.32.2"}
+	if err := cfg.validate(); err != nil {
+		t.Errorf("a CIDR was refused: %v", err)
+	}
+}
+
+func TestHomeAssistantModeDoesNotNeedALoginMethod(t *testing.T) {
+	// The standalone check — "nobody could log in" — is exactly wrong here:
+	// nobody is supposed to log in, and applying it would refuse every valid
+	// add-on configuration.
+	cfg := Default()
+	cfg.Auth.Mode = ModeIngress
+	cfg.Auth.AllowLocal = false
+
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("ingress mode with no local login was refused: %v", err)
+	}
+}
+
+func TestAnUnknownModeIsRefused(t *testing.T) {
+	cfg := Default()
+	cfg.Auth.Mode = "trust-everyone"
+
+	err := cfg.validate()
+	if err == nil {
+		t.Fatal("an unknown auth mode was accepted")
+	}
+	// A typo in the mode must not fall back to something permissive.
+	if !strings.Contains(err.Error(), "standalone") {
+		t.Errorf("error %q does not say what the modes are", err)
+	}
+}
+
+func TestIngressDefaultsAreFilledInOnLoad(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mqttview.yaml")
+	// The minimum an add-on could write. Everything else has to be supplied,
+	// or the add-on would have to repeat mqttview's defaults and drift.
+	if err := os.WriteFile(path, []byte("data_dir: "+dir+"\nauth:\n  mode: ingress\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Auth.Ingress.DefaultRole != "operator" {
+		t.Errorf("default role = %q", cfg.Auth.Ingress.DefaultRole)
+	}
+	if len(cfg.Auth.Ingress.TrustedProxies) != 1 || cfg.Auth.Ingress.TrustedProxies[0] != "172.30.32.2" {
+		t.Errorf("trusted proxies = %v", cfg.Auth.Ingress.TrustedProxies)
+	}
+}
+
+func TestIngressCanBeConfiguredEntirelyFromTheEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MQTTVIEW_DATA_DIR", dir)
+	t.Setenv("MQTTVIEW_AUTH_MODE", "ingress")
+	t.Setenv("MQTTVIEW_INGRESS_TRUSTED_PROXIES", "172.30.32.2, 10.0.0.0/8")
+	t.Setenv("MQTTVIEW_INGRESS_DEFAULT_ROLE", "viewer")
+	t.Setenv("MQTTVIEW_INGRESS_ADMIN_USERS", "dean,someone else")
+	t.Setenv("MQTTVIEW_INGRESS_FALLBACK_USER", "home")
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Auth.Mode != ModeIngress {
+		t.Errorf("mode = %q", cfg.Auth.Mode)
+	}
+	// Whitespace around a comma is what a person writes; splitting on the
+	// comma alone would produce a proxy called " 10.0.0.0/8" and refuse to
+	// start with a message about an unparseable address.
+	want := []string{"172.30.32.2", "10.0.0.0/8"}
+	if len(cfg.Auth.Ingress.TrustedProxies) != 2 ||
+		cfg.Auth.Ingress.TrustedProxies[0] != want[0] ||
+		cfg.Auth.Ingress.TrustedProxies[1] != want[1] {
+		t.Errorf("trusted proxies = %#v", cfg.Auth.Ingress.TrustedProxies)
+	}
+	if len(cfg.Auth.Ingress.AdminUsers) != 2 {
+		t.Errorf("admin users = %#v", cfg.Auth.Ingress.AdminUsers)
+	}
+	if cfg.Auth.Ingress.FallbackUser != "home" || cfg.Auth.Ingress.DefaultRole != "viewer" {
+		t.Errorf("ingress = %+v", cfg.Auth.Ingress)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -82,7 +83,18 @@ func (s *Server) Handler() http.Handler {
 	r.Use(s.requestLogger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
-	r.Use(securityHeaders)
+	r.Use(s.securityHeaders)
+
+	// In Home Assistant mode the Supervisor has already decided who this is,
+	// so the session middleware is replaced wholesale and the local sign-in
+	// routes below are never mounted. Keeping them would mean a login form
+	// nobody has a password for, and an account nobody can recover.
+	authenticate := s.auth.Middleware
+	csrf := s.auth.CSRF
+	if s.auth.IngressMode() {
+		authenticate = s.auth.IngressMiddleware
+		csrf = s.auth.IngressCSRF
+	}
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", s.handleHealth)
@@ -91,6 +103,15 @@ func (s *Server) Handler() http.Handler {
 		// are available before anyone is authenticated.
 		r.Route("/auth", func(r chi.Router) {
 			r.Get("/config", s.handleAuthConfig)
+
+			if s.auth.IngressMode() {
+				r.Group(func(r chi.Router) {
+					r.Use(authenticate, csrf)
+					r.Get("/me", s.handleMe)
+				})
+				return
+			}
+
 			// Login carries no session yet, so there is no CSRF token to
 			// check; the rate limiter in the auth service is what protects it.
 			r.Post("/login", s.handleLogin)
@@ -106,7 +127,7 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/saml/{provider}/acs", s.handleSAMLACS)
 
 			r.Group(func(r chi.Router) {
-				r.Use(s.auth.Middleware, s.auth.CSRF)
+				r.Use(authenticate, csrf)
 				r.Get("/me", s.handleMe)
 				r.Post("/logout", s.handleLogout)
 				r.Post("/password", s.handleChangePassword)
@@ -123,14 +144,14 @@ func (s *Server) Handler() http.Handler {
 
 		// Everything below requires a session.
 		r.Group(func(r chi.Router) {
-			r.Use(s.auth.Middleware)
+			r.Use(authenticate)
 
 			// The WebSocket handshake is a GET, so CSRF does not apply; the
 			// origin check inside the hub is what guards it.
 			r.Get("/ws", s.handleWS)
 
 			r.Group(func(r chi.Router) {
-				r.Use(s.auth.CSRF)
+				r.Use(csrf)
 				s.mountConnections(r)
 				s.mountUsers(r)
 				s.mountPlugins(r)
@@ -186,32 +207,68 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 // securityHeaders sets the defensive headers that apply to every response.
 // The CSP is strict because the SPA ships no inline scripts; 'unsafe-inline'
 // on styles is needed for the CSS-in-JS the build emits.
-func securityHeaders(next http.Handler) http.Handler {
+func (s *Server) securityHeaders(next http.Handler) http.Handler {
+	frameAncestors, xFrameOptions := s.frameRules()
+
+	csp := "default-src 'self'; " +
+		"script-src 'self'; " +
+		"style-src 'self' 'unsafe-inline'; " +
+		"img-src 'self' data:; " +
+		"font-src 'self' data:; " +
+		"connect-src 'self' ws: wss:; " +
+		"frame-ancestors " + frameAncestors + "; " +
+		"base-uri 'self'; " +
+		"form-action 'self'"
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "same-origin")
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")
-		h.Set("Content-Security-Policy",
-			"default-src 'self'; "+
-				"script-src 'self'; "+
-				"style-src 'self' 'unsafe-inline'; "+
-				"img-src 'self' data:; "+
-				"font-src 'self' data:; "+
-				"connect-src 'self' ws: wss:; "+
-				"frame-ancestors 'none'; "+
-				"base-uri 'self'; "+
-				"form-action 'self'")
+		h.Set("Content-Security-Policy", csp)
+		// X-Frame-Options has no syntax for a list of origins, so it is set
+		// only when it can say the same thing as the CSP. Where it cannot,
+		// frame-ancestors is the one that counts and every browser mqttview
+		// supports honours it.
+		if xFrameOptions != "" {
+			h.Set("X-Frame-Options", xFrameOptions)
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// frameRules decides who may put mqttview in an iframe.
+//
+// Refusing everybody is right for a standalone install: a page that frames it
+// can trick somebody into clicking a button they cannot see. It is exactly
+// wrong for Home Assistant, where the panel *is* an iframe — served from Home
+// Assistant's own origin under ingress, hence 'self'. Anything else has to be
+// named by the operator, because it means trusting that site with the UI.
+func (s *Server) frameRules() (csp, xFrameOptions string) {
+	if len(s.cfg.FrameAncestors) > 0 {
+		return strings.Join(s.cfg.FrameAncestors, " "), ""
+	}
+	if s.auth.IngressMode() {
+		return "'self'", "SAMEORIGIN"
+	}
+	return "'none'", "DENY"
 }
 
 // OriginPatterns derives the allowed WebSocket origins from the configured
 // base URL, so a browser on another site cannot open a socket with the user's
 // cookies.
-func OriginPatterns(baseURL string) []string {
-	u, err := url.Parse(baseURL)
+//
+// In Home Assistant mode the origin is Home Assistant's, and mqttview has no
+// way to know what that is: the same install is reached at a .local name, at a
+// LAN address and through Nabu Casa, and all three are legitimate. Any pattern
+// is returned instead, which is safe here only because every ingress request
+// has already been proved to come from the Supervisor before it reaches this
+// point — a browser on another site cannot get a request there at all.
+func OriginPatterns(cfg config.Config) []string {
+	if cfg.Auth.Mode == config.ModeIngress {
+		return []string{"*"}
+	}
+	u, err := url.Parse(cfg.BaseURL)
 	if err != nil || u.Host == "" {
 		return nil
 	}

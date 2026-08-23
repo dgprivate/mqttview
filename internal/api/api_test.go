@@ -502,10 +502,25 @@ func TestMain(m *testing.M) {
 // one hashed asset, which is enough to cover both cache-control branches.
 func testFrontend() fs.FS {
 	return fstest.MapFS{
-		"index.html":          {Data: []byte(`<!doctype html><div id="root"></div>`)},
+		// The base tag is what the real build emits and what the server
+		// rewrites under ingress, so the stand-in has to carry it too.
+		"index.html": {Data: []byte(
+			`<!doctype html><html><head><base href="/" /></head>` +
+				`<body><div id="root"></div></body></html>`)},
 		"assets/index-abc.js": {Data: []byte("console.log(1)")},
 		"favicon.ico":         {Data: []byte("icon")},
 	}
+}
+
+// frontendIndex swaps in a different index.html, for tests about how it is
+// served rather than what it contains.
+func (ts *testServer) frontendIndex(html string) {
+	opts := ts.opts
+	opts.Web = fstest.MapFS{
+		"index.html":          {Data: []byte(html)},
+		"assets/index-abc.js": {Data: []byte("console.log(1)")},
+	}
+	ts.http.Config.Handler = api.New(opts).Handler()
 }
 
 // emptyFrontend swaps in a filesystem with no index.html, which is what an

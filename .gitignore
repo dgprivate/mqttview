@@ -23,3 +23,7 @@ secret.key
 .idea/
 .vscode/
 *.swp
+
+# The HACS integration is Python, and Python leaves these behind.
+__pycache__/
+*.py[cod]

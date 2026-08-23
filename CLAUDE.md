@@ -10,6 +10,11 @@ A single Go binary with a React frontend embedded in it. `cmd/mqttview` is the
 server, `internal/` is everything it does, `web/` is the UI, and
 `cmd/mqttview-mcp` is a separate binary that exposes the PLC plugin over MCP.
 
+It ships three ways: the binary, the hardened container image, and a Home
+Assistant add-on in `addon/` that wraps the same image. `custom_components/` is
+a HACS integration that only adds a sidebar link — it is not the add-on and
+does not remove the login.
+
 Data lives in one SQLite file plus an encryption key beside it. There is no
 other state: no cache to warm, no queue, no second service.
 
@@ -85,6 +90,18 @@ passwords, TLS private keys and TOTP secrets go through `internal/secrets`.
 **Forwarded headers are not trusted by default.** `X-Forwarded-For` is read only
 when `auth.trust_proxy_headers` is on, because the value keys the sign-in rate
 limit and anyone can send that header. Do not reintroduce `middleware.RealIP`.
+
+**Home Assistant mode believes a header, and one check is why that is safe.**
+`internal/auth/ingress.go` reads `X-Remote-User-*` to decide who somebody is —
+but only after `checkIngressSource` has proved the request came from the
+Supervisor. Reorder those, widen `trusted_proxies` to a default that includes
+anything else, or read the headers anywhere outside that path, and mqttview
+becomes an MQTT console where the attacker picks their own username. The same
+goes for `X-Ingress-Path`: it is read in ingress mode only, and it is
+constrained to something that can only be a path before it reaches the page.
+
+The add-on publishes no port, deliberately. Adding one gives the same server a
+second door that the source check has to hold shut forever.
 
 **A user is loaded through two different queries.** `GetUser` and `SessionUser`
 each have their own column list, and `SessionUser` is what every authenticated

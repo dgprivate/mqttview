@@ -8,13 +8,18 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/mqttview/mqttview/internal/auth"
+	"github.com/mqttview/mqttview/internal/config"
 	"github.com/mqttview/mqttview/internal/httpx"
 	"github.com/mqttview/mqttview/internal/store"
 )
 
 // authConfigResponse tells the login page what it may offer.
 type authConfigResponse struct {
-	AllowLocal bool `json:"allowLocal"`
+	// Mode is "standalone" or "ingress". The login page needs it before
+	// anything else: in ingress mode there is no login page at all, and
+	// rendering one would ask for a password that does not exist.
+	Mode       string `json:"mode"`
+	AllowLocal bool   `json:"allowLocal"`
 	// Providers are OIDC; SAMLProviders are SAML. They are separate because
 	// the login page sends the browser to a different URL for each.
 	Providers     []auth.ProviderInfo `json:"providers"`
@@ -25,6 +30,14 @@ type authConfigResponse struct {
 }
 
 func (s *Server) handleAuthConfig(w http.ResponseWriter, _ *http.Request) {
+	if s.auth.IngressMode() {
+		// No user count and no provider list: neither means anything when
+		// Home Assistant decides who gets in, and an account is created the
+		// first time somebody opens the panel.
+		httpx.WriteJSON(w, http.StatusOK, authConfigResponse{Mode: string(config.ModeIngress)})
+		return
+	}
+
 	count, err := s.db.CountUsers()
 	if err != nil {
 		s.log.Error("counting users failed", "error", err)
@@ -32,6 +45,7 @@ func (s *Server) handleAuthConfig(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, authConfigResponse{
+		Mode:           string(config.ModeStandalone),
 		AllowLocal:     s.cfg.Auth.AllowLocal,
 		Providers:      s.auth.ProviderInfos(),
 		SAMLProviders:  s.auth.SAMLProviderInfos(),

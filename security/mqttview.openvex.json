@@ -3,8 +3,24 @@
   "@id": "https://github.com/dgprivate/mqttview/security/mqttview.openvex.json",
   "author": "mqttview maintainers",
   "role": "Project maintainer",
-  "timestamp": "2026-08-22T00:00:00Z",
-  "version": 1,
+  "timestamp": "2026-08-23T00:00:00Z",
+  "version": 2,
   "tooling": "hand-written; see security/README.md for how a statement gets added",
-  "statements": []
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "GO-2026-5932",
+        "description": "golang.org/x/crypto/openpgp is unmaintained, unsafe by design, and has known security issues"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/github.com/mqttview/mqttview"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "mqttview requires golang.org/x/crypto for argon2, which is what password hashes are derived with. It does not import openpgp, and nothing in the dependency tree does either: `go mod why -m golang.org/x/crypto` names internal/auth and golang.org/x/crypto/argon2 alone. The advisory has no fixed version and never will, because it is a statement about the package being abandoned rather than a defect to patch. Verified with `govulncheck ./...`, which reports it under Module Results and finds no call path.",
+      "timestamp": "2026-08-23T00:00:00Z"
+    }
+  ]
 }

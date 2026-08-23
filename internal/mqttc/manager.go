@@ -33,6 +33,13 @@ type Manager struct {
 	obsMu   sync.RWMutex
 	obs     map[int]Observer
 	nextObs int
+
+	// stopSupervisors ends the auto-connect retry loops. Shutdown has to be
+	// able to stop them, or a manager that has been told to stop keeps dialling
+	// a broker until the process exits — which is a leaked goroutine in a test
+	// and a connection attempt after SIGTERM in production.
+	stopSupervisors context.CancelFunc
+	supervisors     sync.WaitGroup
 }
 
 // NewManager returns an empty manager.
@@ -187,12 +194,27 @@ func (m *Manager) Publish(ctx context.Context, id string, req PublishRequest) er
 // Failures are logged and left on the connection's status rather than returned:
 // one unreachable broker must not stop startup.
 func (m *Manager) StartAutoConnect(ctx context.Context) {
+	ctx, cancel := context.WithCancel(ctx)
+
+	m.mu.Lock()
+	// A second call replaces the first, so the loops it started are stopped
+	// rather than left running alongside the new ones.
+	if m.stopSupervisors != nil {
+		m.stopSupervisors()
+	}
+	m.stopSupervisors = cancel
+	m.mu.Unlock()
+
 	for _, c := range m.List() {
 		spec := c.Spec()
 		if !spec.AutoConnect {
 			continue
 		}
-		go m.superviseAutoConnect(ctx, c, spec.Name)
+		m.supervisors.Add(1)
+		go func() {
+			defer m.supervisors.Done()
+			m.superviseAutoConnect(ctx, c, spec.Name)
+		}()
 	}
 }
 
@@ -203,6 +225,11 @@ const autoConnectBackoff = time.Minute
 func (m *Manager) superviseAutoConnect(ctx context.Context, c *Conn, name string) {
 	backoff := 5 * time.Second
 	for {
+		// Already asked to stop: do not start another dial that Shutdown would
+		// then have to wait out.
+		if ctx.Err() != nil {
+			return
+		}
 		cctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		err := c.connect(cctx)
 		cancel()
@@ -227,8 +254,19 @@ func (m *Manager) superviseAutoConnect(ctx context.Context, c *Conn, name string
 	}
 }
 
-// Shutdown disconnects everything.
+// Shutdown disconnects everything and waits for it to have happened.
 func (m *Manager) Shutdown(ctx context.Context) {
+	// The retry loops first: disconnecting a connection one of them is about
+	// to re-establish would leave it up.
+	m.mu.Lock()
+	stop := m.stopSupervisors
+	m.stopSupervisors = nil
+	m.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
+	m.supervisors.Wait()
+
 	for _, c := range m.List() {
 		if err := c.disconnect(ctx); err != nil {
 			m.log.Warn("disconnect during shutdown failed", "connection", c.Spec().ID, "error", err)

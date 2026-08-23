@@ -1,0 +1,31 @@
+configuration:
+  log_level:
+    name: Log level
+    description: >-
+      How much the add-on writes to its log. Use debug when working out why a
+      broker will not connect.
+  default_role:
+    name: Default role
+    description: >-
+      What a Home Assistant user may do the first time they open the panel.
+      Home Assistant does not tell add-ons who its administrators are, so this
+      cannot be inherited: viewer sees everything and changes nothing, operator
+      can publish and use plugin controls, admin can also add brokers and
+      manage users.
+  admin_users:
+    name: Administrators
+    description: >-
+      Home Assistant usernames or user IDs that get the admin role in mqttview.
+      Adding or removing somebody takes effect on their next page load.
+  fallback_user:
+    name: Fallback user
+    description: >-
+      Only for a Supervisor too old to tell add-ons who you are. When set,
+      everybody who opens the panel shares this one account. Leave it empty
+      unless mqttview says it cannot tell who you are.
+  frame_ancestors:
+    name: Allowed frame origins
+    description: >-
+      Extra origins allowed to embed the mqttview UI in an iframe. Ingress does
+      not need this.
+network: {}

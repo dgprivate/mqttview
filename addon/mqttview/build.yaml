@@ -1,0 +1,10 @@
+# Base images for each architecture. The Home Assistant base image supplies the
+# init system and bashio that an add-on is expected to have; mqttview's own
+# binary is copied in from the project image, so the hardened build is the one
+# that ships.
+build_from:
+  aarch64: ghcr.io/home-assistant/aarch64-base:3.21
+  amd64: ghcr.io/home-assistant/amd64-base:3.21
+  armv7: ghcr.io/home-assistant/armv7-base:3.21
+args:
+  MQTTVIEW_IMAGE: ghcr.io/mqttview/mqttview:latest

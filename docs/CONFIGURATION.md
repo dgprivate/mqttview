@@ -18,6 +18,20 @@ Everything has a default. Running `./mqttview` with no config at all works.
 | `-bootstrap-password` | `MQTTVIEW_BOOTSTRAP_PASSWORD` | generated | Its password. Generated and printed once if unset. |
 | `-version` | — | — | Print the version and exit. |
 
+`-check-config` loads the file, applies the environment on top, prints what the
+result actually means, and exits without creating a data directory or opening a
+port. Run it before a restart rather than finding out from one:
+
+```
+$ mqttview -config /etc/mqttview.yaml -check-config
+auth mode:   ingress
+  trusted proxies: [172.30.32.2]
+  default role:    operator
+  local sign-in, two-factor and SSO are switched off in this mode
+
+this configuration is valid
+```
+
 ## Server
 
 ```yaml
@@ -53,10 +67,34 @@ Independent of the TLS used to reach brokers. `MQTTVIEW_TLS_CERT` implies
 
 ```yaml
 auth:
+  mode: standalone       # or "ingress" for Home Assistant
   session_ttl_hours: 168
   allow_local: true
   allow_signup: false
   providers: {}
+```
+
+`mode` decides who answers "may this person use mqttview".
+
+- `standalone` — mqttview does, with passwords, two-factor, OIDC and SAML.
+  Everything below applies.
+- `ingress` — Home Assistant does. Every local sign-in route is unmounted, the
+  first-administrator bootstrap is skipped, and accounts appear as people open
+  the panel. See [HOME_ASSISTANT.md](HOME_ASSISTANT.md), which is where the
+  whole mode is explained; the summary is that it only works behind the Home
+  Assistant Supervisor, and mqttview refuses anything that did not come from
+  there.
+
+```yaml
+auth:
+  mode: ingress
+  ingress:
+    trusted_proxies: ["172.30.32.2"]   # the Supervisor. Never empty.
+    default_role: operator
+    admin_users: ["dean"]
+    fallback_user: ""                  # only for a Supervisor too old to send
+                                       # identity headers; everybody then
+                                       # shares this one account
 ```
 
 - `allow_local` — username and password sign-in. Turn it off to force SSO.
@@ -65,7 +103,10 @@ auth:
   blank) and SSO links to them by email.
 
 Startup refuses to proceed if `allow_local` is false and no provider is enabled,
-rather than booting a server nobody can sign in to.
+rather than booting a server nobody can sign in to. That check does not apply in
+`ingress` mode, where nobody is supposed to sign in; instead, startup refuses an
+empty `trusted_proxies`, because identity headers from an unverified source are
+worth nothing.
 
 ### SSO providers
 
@@ -148,6 +189,11 @@ config file would silently revert what someone changed in the UI.
 | `MQTTVIEW_DATA_DIR` | Data directory |
 | `MQTTVIEW_SECRET_KEY` | Encryption key for stored broker credentials |
 | `MQTTVIEW_TLS_CERT` / `MQTTVIEW_TLS_KEY` | UI TLS |
+| `MQTTVIEW_AUTH_MODE` | `standalone` or `ingress` |
+| `MQTTVIEW_INGRESS_TRUSTED_PROXIES` | Comma-separated IPs or CIDRs the Supervisor reaches us from |
+| `MQTTVIEW_INGRESS_DEFAULT_ROLE` | Role a Home Assistant user gets on first sight |
+| `MQTTVIEW_INGRESS_ADMIN_USERS` | Comma-separated Home Assistant usernames or IDs granted admin |
+| `MQTTVIEW_INGRESS_FALLBACK_USER` | Shared account when no identity header arrives |
 | `MQTTVIEW_ALLOW_LOCAL` | Enable/disable password login |
 | `MQTTVIEW_ALLOW_SIGNUP` | Enable/disable SSO self-signup |
 | `MQTTVIEW_LOG_LEVEL` | Log level |

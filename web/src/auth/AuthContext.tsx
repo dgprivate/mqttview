@@ -1,12 +1,18 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { api, ApiError } from '../api/client'
-import type { Role, User } from '../api/types'
+import type { AuthMode, Role, User } from '../api/types'
 import { liveSocket } from '../ws/socket'
 
 interface AuthState {
   user: User | null
   loading: boolean
+  /**
+   * mode is what the server said about who authenticates. Pages use it to stop
+   * offering things that do not exist in Home Assistant mode — a login form, a
+   * sign-out link, a password to change.
+   */
+  mode: AuthMode
   signIn: (email: string, password: string, code?: string) => Promise<void>
   signOut: () => Promise<void>
   /** can reports whether the signed-in user holds at least the given role. */
@@ -19,18 +25,24 @@ const rank: Record<Role, number> = { viewer: 1, operator: 2, admin: 3 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
+  const [mode, setMode] = useState<AuthMode>('standalone')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let cancelled = false
-    api
-      .me()
-      .then((u) => {
-        if (!cancelled) setUser(u)
-      })
-      .catch((err: unknown) => {
-        // A 401 here just means "not signed in yet", not a failure worth
-        // surfacing.
+    // The mode is asked for alongside the user rather than after it, because
+    // the answer decides what to render when there is no user: a login form,
+    // or an explanation that Home Assistant refused.
+    Promise.allSettled([api.authConfig(), api.me()])
+      .then(([cfg, me]) => {
+        if (cancelled) return
+        if (cfg.status === 'fulfilled') setMode(cfg.value.mode ?? 'standalone')
+        if (me.status === 'fulfilled') {
+          setUser(me.value)
+          return
+        }
+        // A 401 just means "not signed in yet", not a failure worth surfacing.
+        const err = me.reason
         if (!(err instanceof ApiError) || err.status !== 401) {
           console.error('could not load the current user', err)
         }
@@ -70,8 +82,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   const value = useMemo(
-    () => ({ user, loading, signIn, signOut, can }),
-    [user, loading, signIn, signOut, can],
+    () => ({ user, loading, mode, signIn, signOut, can }),
+    [user, loading, mode, signIn, signOut, can],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

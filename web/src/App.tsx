@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom'
+import { basePath } from './api/base'
 import { api } from './api/client'
 import type { PluginInfo } from './api/types'
 import { AuthProvider, useAuth } from './auth/AuthContext'
@@ -16,7 +17,7 @@ import { Users } from './pages/Users'
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={basePath()}>
       <AuthProvider>
         <Shell />
       </AuthProvider>
@@ -25,9 +26,14 @@ export default function App() {
 }
 
 function Shell() {
-  const { user, loading } = useAuth()
+  const { user, loading, mode } = useAuth()
 
   if (loading) return <Spinner label="Starting mqttview…" />
+  // No user in Home Assistant mode is not "please sign in": there is nothing
+  // to sign in with. It means the request did not reach us through Home
+  // Assistant, and a login form would send somebody looking for a password
+  // that was never created.
+  if (!user && mode === 'ingress') return <IngressBlocked />
   if (!user) return <Login />
 
   return (
@@ -53,8 +59,34 @@ function Shell() {
   )
 }
 
+/**
+ * IngressBlocked is what shows when Home Assistant mode is on but the request
+ * did not come through Home Assistant. It is nearly always one thing: the
+ * add-on port was published and opened directly.
+ */
+function IngressBlocked() {
+  return (
+    <div className="app">
+      <main>
+        <div className="card" style={{ maxWidth: '34rem', margin: '3rem auto' }}>
+          <h2>Open this from Home Assistant</h2>
+          <p>
+            mqttview is running in Home Assistant mode, so it only accepts requests that come
+            through Home Assistant, which is what decides who may see this panel.
+          </p>
+          <p>
+            Use the mqttview entry in the Home Assistant sidebar. If you reached this page at a
+            host and port directly, that port does not need to be published at all — ingress
+            does not use it.
+          </p>
+        </div>
+      </main>
+    </div>
+  )
+}
+
 function Navigation() {
-  const { user, signOut, can } = useAuth()
+  const { user, signOut, can, mode } = useAuth()
   const [open, setOpen] = useState(false)
   const [plugins, setPlugins] = useState<PluginInfo[]>([])
   const location = useLocation()
@@ -73,7 +105,7 @@ function Navigation() {
     // The nav lives inside the bar and wraps onto its own full-width row when
     // opened on a phone, so there is only ever one copy of it in the DOM.
     <header className="topbar">
-      <a className="brand" href="/connections">
+      <a className="brand" href="connections">
         mqtt<span>view</span>
       </a>
       <button
@@ -91,15 +123,20 @@ function Navigation() {
         <NavLink to="/plugins">Plugins</NavLink>
         {can('admin') && <NavLink to="/users">Users</NavLink>}
         <NavLink to="/account">{user?.name || user?.email}</NavLink>
-        <a
-          href="#logout"
-          onClick={(e) => {
-            e.preventDefault()
-            void signOut()
-          }}
-        >
-          Sign out
-        </a>
+        {/* Signing out of mqttview would do nothing in Home Assistant mode:
+            the next request arrives authenticated again. Offering the link
+            would be a button that visibly fails. */}
+        {mode !== 'ingress' && (
+          <a
+            href="#logout"
+            onClick={(e) => {
+              e.preventDefault()
+              void signOut()
+            }}
+          >
+            Sign out
+          </a>
+        )}
       </nav>
     </header>
   )

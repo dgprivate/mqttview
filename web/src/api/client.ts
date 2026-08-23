@@ -1,3 +1,4 @@
+import { apiURL } from './base'
 import type {
   AuthConfig,
   Connection,
@@ -51,7 +52,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set('X-CSRF-Token', token)
   }
 
-  const response = await fetch(path, { ...init, headers, credentials: 'same-origin' })
+  // apiURL rather than the path as written: under Home Assistant ingress the
+  // UI lives below a prefix, and an absolute path would leave the panel.
+  const response = await fetch(apiURL(path), { ...init, headers, credentials: 'same-origin' })
 
   if (response.status === 204) {
     return undefined as T

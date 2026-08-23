@@ -1,0 +1,94 @@
+# Validation for the two Home Assistant delivery paths.
+#
+# Both are easy to get subtly wrong in ways that only show up when somebody
+# tries to install them, which is the worst place to find out: hassfest checks
+# the integration's manifest and translations, and the add-on linter checks the
+# add-on's manifest and Dockerfile.
+name: Home Assistant
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'addon/**'
+      - 'custom_components/**'
+      - 'hacs.json'
+      - '.github/workflows/home-assistant.yml'
+  pull_request:
+    paths:
+      - 'addon/**'
+      - 'custom_components/**'
+      - 'hacs.json'
+      - '.github/workflows/home-assistant.yml'
+  schedule:
+    # Both linters change under us, so a weekly run finds a break before a
+    # release does.
+    - cron: '0 5 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  hassfest:
+    name: Integration manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: hacs/action@main
+        with:
+          category: integration
+          # Brand assets live in the home-assistant/brands repository and are
+          # added by pull request there, which cannot be done from here.
+          ignore: brands
+
+  addon:
+    name: Add-on
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Lint the add-on
+        uses: frenck/action-addon-linter@v2
+        with:
+          path: ./addon/mqttview
+
+      - name: Check the run script
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck addon/mqttview/run.sh
+
+      - name: The options the add-on writes are a configuration mqttview accepts
+        run: |
+          # The add-on's whole job is turning options.json into mqttview's
+          # config. A mapping that produces something the server refuses is a
+          # broken add-on, and this is the only place the two meet.
+          set -euo pipefail
+          sudo mkdir -p /data
+          echo '{"log_level":"info","default_role":"operator",
+                 "admin_users":["someone"],"fallback_user":"",
+                 "frame_ancestors":[]}' | sudo tee /data/options.json > /dev/null
+
+          sed 's|^exec .*||; s|^ *-config.*||; s|^ *-log-level.*||' \
+            addon/mqttview/run.sh | sudo bash
+
+          go run ./cmd/mqttview -config /data/mqttview.yaml -check-config

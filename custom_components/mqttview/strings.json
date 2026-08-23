@@ -1,0 +1,32 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "mqttview",
+        "description": "The address of your mqttview, as your browser reaches it. The panel is an iframe, so this is fetched by the browser and not by Home Assistant — localhost would mean the phone.\n\nmqttview refuses to be framed by default. Set frame_ancestors in its configuration to this Home Assistant's origin, or the panel will be blank.",
+        "data": {
+          "url": "mqttview URL",
+          "title": "Sidebar title",
+          "icon": "Sidebar icon"
+        }
+      }
+    },
+    "error": {
+      "invalid_url": "Enter a full http:// or https:// address, for example https://mqttview.example.com"
+    },
+    "abort": {
+      "already_configured": "The mqttview panel is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "mqttview panel",
+        "data": {
+          "title": "Sidebar title",
+          "icon": "Sidebar icon"
+        }
+      }
+    }
+  }
+}

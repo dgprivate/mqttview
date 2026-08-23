@@ -53,6 +53,15 @@
       "currentValueTemplate": "latest"
     },
     {
+      "description": "Home Assistant base images, which live in the add-on's build.yaml where no manager looks",
+      "customType": "regex",
+      "managerFilePatterns": ["/^addon/.+/build\\.yaml$/"],
+      "matchStrings": [
+        "\\s+\\w+: (?<depName>ghcr\\.io/home-assistant/[^:\\s]+):(?<currentValue>[^\\s]+)"
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
       "description": "govulncheck, run with 'go run' from the CI workflow rather than being a dependency",
       "customType": "regex",
       "managerFilePatterns": ["/^\\.github/workflows/.+\\.yml$/"],

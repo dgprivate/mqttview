@@ -51,6 +51,7 @@ func run() error {
 		bootstrapPass  = flag.String("bootstrap-password", os.Getenv("MQTTVIEW_BOOTSTRAP_PASSWORD"), "password for that account; generated if empty")
 		showVersion    = flag.Bool("version", false, "print the version and exit")
 		healthCheck    = flag.Bool("health-check", false, "query the health endpoint of a running instance and exit")
+		checkConfig    = flag.Bool("check-config", false, "load the config file, report what it means, and exit")
 	)
 	flag.Parse()
 
@@ -79,6 +80,15 @@ func run() error {
 		cfg.DataDir = *dataDir
 	}
 
+	// Validate and stop, without touching the data directory or opening a
+	// port. Restarting is the usual way to discover a configuration mistake,
+	// and a restart that fails is downtime; this is the cheap way to find out
+	// first, and it is what the add-on's CI job runs against the config its
+	// run script writes.
+	if *checkConfig {
+		return describeConfig(cfg, *configPath)
+	}
+
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return fmt.Errorf("create data directory: %w", err)
 	}
@@ -98,9 +108,22 @@ func run() error {
 	defer db.Close()
 
 	authSvc := auth.New(db, cfg, box, log)
-	created, generated, err := authSvc.BootstrapAdmin(*bootstrapEmail, *bootstrapPass)
-	if err != nil {
-		return fmt.Errorf("bootstrap admin: %w", err)
+
+	// No first administrator in Home Assistant mode: there is no login form to
+	// use it at, and printing a generated password would be handing somebody a
+	// credential for a door that does not exist. Accounts appear as people open
+	// the panel, with the role ingress.default_role gives them.
+	created, generated := false, ""
+	if cfg.Auth.Mode == config.ModeIngress {
+		log.Info("Home Assistant mode: sign-in is handled by Home Assistant",
+			"trustedProxies", cfg.Auth.Ingress.TrustedProxies,
+			"defaultRole", cfg.Auth.Ingress.DefaultRole)
+	} else {
+		var err error
+		created, generated, err = authSvc.BootstrapAdmin(*bootstrapEmail, *bootstrapPass)
+		if err != nil {
+			return fmt.Errorf("bootstrap admin: %w", err)
+		}
 	}
 	if created {
 		email := *bootstrapEmail
@@ -119,7 +142,7 @@ func run() error {
 	}
 
 	mgr := mqttc.NewManager(log)
-	h := hub.New(log, api.OriginPatterns(cfg.BaseURL))
+	h := hub.New(log, api.OriginPatterns(cfg))
 
 	// Every MQTT message and status change goes straight to the browsers.
 	mgr.AddObserver(mqttc.Observer{
@@ -300,5 +323,48 @@ func probeHealth(addr string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("health check: %s", resp.Status)
 	}
+	return nil
+}
+
+// describeConfig prints what a config file resolves to.
+//
+// What it means rather than what it says: the environment overrides the file,
+// defaults fill in the gaps, and an operator looking at a YAML file cannot see
+// either. The authentication mode is first because it is the one that decides
+// whether anybody can reach the thing.
+func describeConfig(cfg config.Config, path string) error {
+	where := path
+	if where == "" {
+		where = "(no file; defaults and environment only)"
+	}
+	fmt.Printf("config:      %s\n", where)
+	fmt.Printf("addr:        %s\n", cfg.Addr)
+	fmt.Printf("base url:    %s\n", cfg.BaseURL)
+	fmt.Printf("data dir:    %s\n", cfg.DataDir)
+	fmt.Printf("auth mode:   %s\n", cfg.Auth.Mode)
+
+	switch cfg.Auth.Mode {
+	case config.ModeIngress:
+		fmt.Printf("  trusted proxies: %v\n", cfg.Auth.Ingress.TrustedProxies)
+		fmt.Printf("  default role:    %s\n", cfg.Auth.Ingress.DefaultRole)
+		if len(cfg.Auth.Ingress.AdminUsers) > 0 {
+			fmt.Printf("  admins:          %v\n", cfg.Auth.Ingress.AdminUsers)
+		}
+		if cfg.Auth.Ingress.FallbackUser != "" {
+			fmt.Printf("  fallback user:   %s (everybody shares this account)\n",
+				cfg.Auth.Ingress.FallbackUser)
+		}
+		fmt.Println("  local sign-in, two-factor and SSO are switched off in this mode")
+	default:
+		fmt.Printf("  password login:  %t\n", cfg.Auth.AllowLocal)
+		fmt.Printf("  two-factor:      required=%t\n", cfg.Auth.RequireTwoFactor)
+		fmt.Printf("  oidc providers:  %d\n", len(cfg.Auth.Providers))
+		fmt.Printf("  saml providers:  %d\n", len(cfg.Auth.SAMLProviders))
+	}
+
+	if len(cfg.FrameAncestors) > 0 {
+		fmt.Printf("framing:     allowed from %v\n", cfg.FrameAncestors)
+	}
+	fmt.Println("\nthis configuration is valid")
 	return nil
 }

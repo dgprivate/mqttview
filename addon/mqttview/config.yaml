@@ -1,0 +1,64 @@
+# Home Assistant add-on manifest.
+#
+# ingress: true is the whole point of this file. It means Home Assistant, not
+# mqttview, decides who may open the panel, and that the panel appears in the
+# sidebar rather than at a host and port somebody has to remember.
+#
+# There is deliberately no `ports:` entry. Publishing the port would put a
+# second, unauthenticated door on the same server — mqttview refuses requests
+# that did not come through the Supervisor, so it would be a door to a refusal
+# page, but a port nobody needs is a port nobody should open.
+name: mqttview
+version: "0.1.0"
+slug: mqttview
+description: A realtime web UI for MQTT brokers, with Home Assistant discovery and a Beckhoff PLC panel
+url: https://github.com/mqttview/mqttview
+arch:
+  - aarch64
+  - amd64
+  - armv7
+image: ghcr.io/mqttview/mqttview-addon-{arch}
+
+# The sidebar entry.
+ingress: true
+ingress_port: 8114
+panel_icon: mdi:transit-connection-variant
+panel_title: mqttview
+panel_admin: false
+
+init: false
+startup: services
+boot: auto
+
+# /data is the add-on's own persistent directory; the database and the
+# encryption key live there and survive an add-on update.
+map:
+  - addon_config:rw
+
+# The Home Assistant MQTT integration's broker settings, so the add-on can
+# offer to connect to the same broker without anybody typing it twice.
+services:
+  - mqtt:want
+
+options:
+  log_level: info
+  default_role: operator
+  admin_users: []
+  fallback_user: ""
+  frame_ancestors: []
+
+schema:
+  log_level: list(debug|info|warn|error)
+  # What a Home Assistant user may do in mqttview on first sight. Home
+  # Assistant does not tell an add-on whether somebody is one of its
+  # administrators, so this cannot be inherited and has to be stated.
+  default_role: list(viewer|operator|admin)
+  # Home Assistant usernames or user IDs that get the admin role in mqttview.
+  admin_users:
+    - str?
+  # Only for a Supervisor too old to send the identity headers. Everybody
+  # shares one account when it is set, which is why it is empty by default.
+  fallback_user: str?
+  # Extra origins allowed to frame the UI. Ingress does not need this.
+  frame_ancestors:
+    - str?

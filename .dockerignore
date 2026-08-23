@@ -21,6 +21,12 @@ mqttview
 web/node_modules/
 web/dist/
 
+# The Home Assistant packaging. The add-on image is built from this one rather
+# than alongside it, and the HACS integration is Python that never enters it;
+# both only make the context bigger and the cache easier to invalidate.
+addon/
+custom_components/
+
 # Editors and docs that do not affect the build
 .idea/
 .vscode/

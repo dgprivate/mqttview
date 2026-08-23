@@ -19,7 +19,14 @@ export interface ProviderInfo {
   displayName: string
 }
 
+/**
+ * AuthMode is who decides whether somebody may use mqttview. In "ingress" mode
+ * that is Home Assistant, and mqttview shows no login page of its own.
+ */
+export type AuthMode = 'standalone' | 'ingress'
+
 export interface AuthConfig {
+  mode: AuthMode
   samlProviders: ProviderInfo[]
   allowLocal: boolean
   providers: ProviderInfo[]

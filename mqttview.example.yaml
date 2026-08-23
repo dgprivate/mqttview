@@ -26,7 +26,16 @@ tls:
   # cert_file: /etc/mqttview/tls.crt
   # key_file: /etc/mqttview/tls.key
 
+# Framing. Empty refuses every site, which is right unless something else is
+# meant to embed the UI. Home Assistant ingress does not need this.
+# frame_ancestors:
+#   - https://homeassistant.example.com
+
 auth:
+  # standalone (default) or ingress. See docs/HOME_ASSISTANT.md before using
+  # ingress: it hands sign-in to Home Assistant and only works behind the
+  # Supervisor.
+  mode: standalone
   # How long a browser session stays valid.
   session_ttl_hours: 168
 

@@ -55,6 +55,21 @@ linters:
 
   exclusions:
     rules:
+      # G705 XSS taint: serveIndex writes index.html with the base href
+      # rewritten from X-Ingress-Path. The taint analysis sees a header
+      # reaching a Write and stops there; it cannot see the two things that
+      # make it safe, both of which have tests:
+      #
+      #   * auth.IngressPath admits only ^(/[A-Za-z0-9._~-]+)+/?$ — no quote,
+      #     angle bracket or ampersand can survive it — and returns "" outside
+      #     ingress mode, where nothing has vouched for the header;
+      #   * withBase escapes the value again with template.HTMLEscapeString.
+      #
+      # See TestIngressPathIsConstrainedToSomethingThatCanOnlyBeAPath and
+      # TestTheIngressPrefixIsIgnoredInStandaloneMode.
+      - path: internal/api/spa\.go
+        text: 'G705'
+        linters: [gosec]
       # Tests set up adversarial conditions on purpose, and a response body in
       # a test dies with the test.
       - path: _test\.go

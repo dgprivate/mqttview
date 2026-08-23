@@ -431,15 +431,30 @@ func TestUnknownAPIPathsAre404JSON(t *testing.T) {
 }
 
 func TestOriginPatterns(t *testing.T) {
-	if got := api.OriginPatterns("https://mqtt.example.com:8443"); len(got) != 1 || got[0] != "mqtt.example.com:8443" {
+	base := func(url string) config.Config {
+		cfg := config.Default()
+		cfg.BaseURL = url
+		return cfg
+	}
+
+	if got := api.OriginPatterns(base("https://mqtt.example.com:8443")); len(got) != 1 ||
+		got[0] != "mqtt.example.com:8443" {
 		t.Errorf("OriginPatterns = %v", got)
 	}
 	// An unusable base URL yields no patterns, which the websocket library
 	// treats as same-origin only — the safe direction to fail in.
 	for _, bad := range []string{"", "://nonsense", "not a url"} {
-		if got := api.OriginPatterns(bad); len(got) != 0 {
+		if got := api.OriginPatterns(base(bad)); len(got) != 0 {
 			t.Errorf("OriginPatterns(%q) = %v, want none", bad, got)
 		}
+	}
+
+	// Home Assistant mode cannot know which of a dozen legitimate names the
+	// browser used, and does not need to: the source check has already run.
+	ingress := config.Default()
+	ingress.Auth.Mode = config.ModeIngress
+	if got := api.OriginPatterns(ingress); len(got) != 1 || got[0] != "*" {
+		t.Errorf("in ingress mode OriginPatterns = %v", got)
 	}
 }
 

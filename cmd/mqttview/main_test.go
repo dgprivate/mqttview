@@ -356,3 +356,53 @@ func TestRunRefusesAnUnusableConfig(t *testing.T) {
 		t.Fatal("a configuration nobody could sign in to was accepted")
 	}
 }
+
+// -check-config exists so a configuration mistake is found before a restart
+// rather than by one. The add-on's CI job runs it against the config its run
+// script writes, which is the only place the two meet.
+
+func TestCheckConfigValidatesWithoutStartingAnything(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mqttview.yaml")
+	data := filepath.Join(dir, "data")
+
+	if err := os.WriteFile(path, []byte(
+		"data_dir: "+data+"\nauth:\n  mode: ingress\n  ingress:\n    admin_users: [dean]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	resetFlags()
+	os.Args = []string{"mqttview", "-config", path, "-check-config"}
+	if err := run(); err != nil {
+		t.Fatalf("a valid config was rejected: %v", err)
+	}
+
+	// Nothing was created: no database, no key, no directory. Checking a
+	// config on a machine that is not the server must leave no trace.
+	if _, err := os.Stat(data); !os.IsNotExist(err) {
+		t.Errorf("the data directory was created by a check: %v", err)
+	}
+}
+
+func TestCheckConfigRefusesAConfigurationThatWouldLetAnybodyIn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mqttview.yaml")
+
+	// Ingress mode with no trusted proxy: the identity headers would be
+	// whatever the caller typed.
+	if err := os.WriteFile(path, []byte(
+		"auth:\n  mode: ingress\n  ingress:\n    trusted_proxies: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	resetFlags()
+	os.Args = []string{"mqttview", "-config", path, "-check-config"}
+
+	err := run()
+	if err == nil {
+		t.Fatal("a configuration with no trusted proxy passed the check")
+	}
+	if !strings.Contains(err.Error(), "trusted_proxies") {
+		t.Errorf("error %q does not name the setting", err)
+	}
+}
