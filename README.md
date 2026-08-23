@@ -197,8 +197,12 @@ login of its own: under ingress, Home Assistant has already decided you may
 open the panel, and asking for a second password would be one more credential
 to lose rather than one more lock.
 
-Settings → Add-ons → Add-on Store → ⋮ → Repositories → add
+Settings → **Apps** → ⋮ → Repositories → add
 `https://github.com/dgprivate/mqttview`, then install **mqttview**.
+
+(Home Assistant renamed add-ons to *apps*; older versions call the same thing
+Add-ons. From a terminal on the host it is
+`ha store add https://github.com/dgprivate/mqttview`.)
 
 No port is published, and mqttview refuses any request that did not come
 through the Supervisor — that check is what makes the identity headers worth

@@ -55,7 +55,7 @@
     {
       "description": "Home Assistant base images, which live in the add-on's build.yaml where no manager looks",
       "customType": "regex",
-      "managerFilePatterns": ["/^addon/.+/build\\.yaml$/"],
+      "managerFilePatterns": ["/^addon/build\\.yaml$/"],
       "matchStrings": [
         "\\s+\\w+: (?<depName>ghcr\\.io/home-assistant/[^:\\s]+):(?<currentValue>[^\\s]+)"
       ],

@@ -11,12 +11,14 @@ on:
     branches: [main]
     paths:
       - 'addon/**'
+      - 'repository.yaml'
       - 'custom_components/**'
       - 'hacs.json'
       - '.github/workflows/home-assistant.yml'
   pull_request:
     paths:
       - 'addon/**'
+      - 'repository.yaml'
       - 'custom_components/**'
       - 'hacs.json'
       - '.github/workflows/home-assistant.yml'
@@ -74,12 +76,23 @@ jobs:
       - name: Lint the add-on
         uses: frenck/action-addon-linter@v2
         with:
-          path: ./addon/mqttview
+          path: ./addon
 
       - name: Check the run script
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
-          shellcheck addon/mqttview/run.sh
+          shellcheck addon/run.sh
+
+      - name: The layout the Supervisor requires
+        run: |
+          # frenck's linter checks the manifest; nothing checks where it sits.
+          # The Supervisor reads repository.yaml from the root and each app from
+          # a directory beside it, and says only "is not a valid app repository"
+          # when that is wrong — which cost an evening to work out once.
+          set -euo pipefail
+          test -f repository.yaml || { echo "repository.yaml must be in the root"; exit 1; }
+          test -f addon/config.yaml || { echo "addon/config.yaml is missing"; exit 1; }
+          echo "repository.yaml in the root, addon/config.yaml beside it"
 
       - name: The options the add-on writes are a configuration mqttview accepts
         run: |
@@ -93,6 +106,6 @@ jobs:
                  "frame_ancestors":[]}' | sudo tee /data/options.json > /dev/null
 
           sed 's|^exec .*||; s|^ *-config.*||; s|^ *-log-level.*||' \
-            addon/mqttview/run.sh | sudo bash
+            addon/run.sh | sudo bash
 
           go run ./cmd/mqttview -config /data/mqttview.yaml -check-config

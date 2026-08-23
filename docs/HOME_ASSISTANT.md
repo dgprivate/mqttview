@@ -2,18 +2,23 @@
 
 mqttview runs in two modes. This document is about the second one.
 
-| Mode           | Who decides you may use it | How it is installed                    |
-| -------------- | -------------------------- | -------------------------------------- |
-| **standalone** | mqttview                   | Go binary, Docker image, compose        |
-| **ingress**    | Home Assistant             | Home Assistant add-on, sidebar panel    |
+| Mode           | Who decides you may use it | How it is installed                 |
+| -------------- | -------------------------- | ----------------------------------- |
+| **standalone** | mqttview                   | Go binary, Docker image, compose     |
+| **ingress**    | Home Assistant             | Home Assistant app, sidebar panel    |
+
+Home Assistant renamed **add-ons** to **apps**. Both names appear below,
+because which one you see depends on your version and the CLI still answers to
+`ha addons` as an alias for `ha apps`.
 
 ## Which one do I want?
 
-Answer one question: **does your Home Assistant have an Add-on Store?**
+Answer one question: **does your Home Assistant have an app store?** Settings →
+About shows the *Installation Type*, and that is what decides it.
 
-- **Home Assistant OS or Supervised** — yes. Install the **add-on**. mqttview
+- **Home Assistant OS or Supervised** — yes. Install the **app**. mqttview
   appears in the sidebar, there is no login, and no port is published.
-- **Home Assistant Container or Core** — no. There are no add-ons at all, and
+- **Home Assistant Container or Core** — no. There are no apps at all, and
   ingress does not exist. Run mqttview standalone and use the **HACS
   integration** to put a link to it in the sidebar. mqttview keeps its own
   sign-in, because nothing has authenticated you on its behalf.
@@ -21,29 +26,47 @@ Answer one question: **does your Home Assistant have an Add-on Store?**
 ### A note on HACS
 
 HACS installs integrations, dashboard cards and themes. It does **not** install
-add-ons — those come from an add-on repository added in the Add-on Store. Both
-live in this repository, which is why the instructions differ.
+apps — those come from a repository added in the app store. They are separate
+repositories as well as separate mechanisms, which is why the instructions
+differ.
 
 So "install through HACS and get a tab with no login" is two different things
 that cannot both be true at once: the no-login part comes from ingress, and
-ingress comes from the add-on. If you have Supervisor, take the add-on; it is
-the better experience by some distance.
+ingress comes from the app. If you have Supervisor, take the app; it is the
+better experience by some distance.
 
-## The add-on
+## The app
 
-Settings → Add-ons → Add-on Store → ⋮ → Repositories → add
+Settings → **Apps** → ⋮ → Repositories → add
 `https://github.com/dgprivate/mqttview`, then install **mqttview**.
 
-Options are documented in `addon/mqttview/DOCS.md`.
+From a terminal on the host, which is faster than finding the menu:
 
-The add-on builds itself on first install, which takes a minute: it pulls
+```bash
+ha store add https://github.com/dgprivate/mqttview
+ha store reload
+ha store apps | grep -i mqttview      # prints the slug, with a repository prefix
+ha apps install <slug>
+ha apps start <slug>
+ha apps logs <slug>
+```
+
+### Where it lives
+
+`repository.yaml` in the repository root and `addon/` beside it. That shape is
+required: the Supervisor reads the manifest from the root and each app from a
+directory next to it, and it does not look any deeper. With the two nested one
+level down, adding the repository fails with `is not a valid app repository`
+and no further detail.
+
+The app builds itself on first install, which takes a minute: it pulls
 `hausbit/mqttview` and adds the entrypoint that turns Home Assistant's options
-into mqttview's configuration. There is no separate add-on image to keep in
-step with the binary, which is one fewer thing to get wrong.
+into mqttview's configuration. There is no separate app image to keep in step
+with the binary, which is one fewer thing to get wrong.
 
 ### How the no-login part works, and what it rests on
 
-Under ingress, Home Assistant is the only thing that can reach the add-on. It
+Under ingress, Home Assistant is the only thing that can reach the app. It
 authenticates the person, checks they may see the panel, and forwards the
 request with headers saying who they are:
 
@@ -59,9 +82,9 @@ Supervisor at `172.30.32.2`. That check is the whole of the security here.
 Without it, anybody who could reach the port would be whoever they typed into
 a header, so:
 
-- the add-on publishes **no port**;
-- `trusted_proxies` is not an add-on option, because there is no other address
-  an add-on has any reason to trust;
+- the app publishes **no port**;
+- `trusted_proxies` is not an option, because there is no other address an app
+  has any reason to trust;
 - an empty `trusted_proxies` is a configuration error, not "trust everyone".
 
 `X-Ingress-Path` is read in ingress mode only, and constrained to something
@@ -71,7 +94,7 @@ nothing has checked who set it.
 
 ### Roles
 
-Home Assistant does not tell an add-on whether you are one of its
+Home Assistant does not tell an app whether you are one of its
 administrators. mqttview cannot copy a fact it is not told, so instead:
 
 - everybody who opens the panel gets `default_role` (`operator` by default);
@@ -137,7 +160,7 @@ mqttview speaks OIDC and SAML, and Home Assistant is not either.
 
 ## Running both
 
-There is nothing stopping you running the add-on for the panel and a
+There is nothing stopping you running the app for the panel and a
 standalone instance for access from outside. They are separate installs with
 separate databases; a broker connection added in one does not appear in the
 other.

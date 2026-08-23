@@ -1,0 +1,9 @@
+# What the Home Assistant app store reads to know this repository offers apps.
+#
+# It has to be in the root, and each app has to be a directory beside it —
+# addon/ here. The Supervisor does not look any deeper: with this file one level
+# down, adding the repository fails with "is not a valid app repository" and no
+# further explanation, which is how this ended up in the root.
+name: mqttview
+url: https://github.com/dgprivate/mqttview
+maintainer: Dean Gostiša <dean@black.si>
