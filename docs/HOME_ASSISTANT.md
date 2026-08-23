@@ -40,6 +40,36 @@ better experience by some distance.
 Settings → **Apps** → ⋮ → Repositories → add
 `https://github.com/dgprivate/mqttview`, then install **mqttview**.
 
+### Two apps, and which to install
+
+The repository offers the same app twice. They are the same binary, the same
+options and the same panel; they differ in one line of the manifest.
+
+| App                                    | Slug                  | May read                                     |
+| -------------------------------------- | --------------------- | -------------------------------------------- |
+| **mqttview**                           | `mqttview`            | Who you are, and nothing else                |
+| **mqttview (Home Assistant config access)** | `mqttview_hassconfig` | Also `/homeassistant` and `/ssl`, read-only |
+
+**Install the plain one** unless you want the second thing it does: read the
+broker out of your MQTT integration — address, username, password and
+certificate paths — and add it for you, with no retyping.
+
+That access cannot be an option on the plain app. A mapping is granted when an
+app is installed, and an option can only decide whether an app uses access it
+already has; a switch marked "off" next to a directory it can read anyway would
+be theatre. So it is a separate install, and declining it means not installing
+it.
+
+What you are granting is wider than what it is used for. `/homeassistant` is
+the whole configuration directory: `secrets.yaml`, and the stored credentials
+of every integration you have. mqttview reads one entry out of
+`.storage/core.config_entries` and writes nothing — `homeassistant_config:ro`
+is read-only and the tests assert both — but the grant is the directory, not
+the entry.
+
+The two are separate apps with separate data. Switching from one to the other
+means adding your brokers again.
+
 From a terminal on the host, which is faster than finding the menu:
 
 ```bash
@@ -115,7 +145,16 @@ If it is not, set `mqtt_url` in the app's configuration and it is added the same
 way. That is not a shortcoming to work around: the Supervisor's service registry
 is written by apps that *provide* a broker, and the MQTT integration reads from
 it. A broker entered into the integration, or running elsewhere on the network,
-is invisible to an app by any route, so naming it once is the honest answer.
+is invisible to an app by any route through the Supervisor.
+
+Which is where the second app comes in. `mqttview_hassconfig` may read the
+configuration directory, so when the Supervisor has nothing to share it reads
+the MQTT integration's own entry instead: broker, port, username, password,
+CA, client certificate and key. A broker with mutual TLS is set up without
+anybody moving three files and retyping two paths. The plain app runs the same
+code, finds the directory is not there, says so in its log and carries on —
+the capability is inert without the permission rather than switched off by an
+option.
 
 It only ever adds. A connection you have since edited is left exactly as it is,
 because a configuration that reasserts itself on every restart is a setting

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -98,13 +99,17 @@ func newRuntime(t *testing.T) (*Runtime, *store.Store, *mqttc.Manager, *recorder
 
 	mgr := mqttc.NewManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
 
-	// Registered under a unique id per test, because the registry is global.
+	// Registered under a unique id per test, because the registry is global —
+	// and removed again afterwards, because a test name is only unique within
+	// one run. Under -count=5 the second run registered the same id and
+	// Register panics on a duplicate, by design: outside a test that is a
+	// build mistake.
 	p := &recorder{}
 	id := "recorder-" + t.Name()
 	Register(id, func() Plugin { return p })
+	unregisterAfter(t, id)
 
 	rt := NewRuntime(db, mgr, slog.New(slog.NewTextHandler(io.Discard, nil)), func(string, any) {})
-	_ = id
 	return rt, db, mgr, p
 }
 
@@ -207,15 +212,23 @@ func TestHostKVIsNamespacedAndPersistent(t *testing.T) {
 }
 
 func TestRegisteredReportsWhatIsCompiledIn(t *testing.T) {
+	// The plugins themselves live in subpackages, so nothing is registered in
+	// this one unless a test registers it. This used to read the registry and
+	// require it to be non-empty, which passed only because some other test had
+	// run first and left its plugin behind — a shuffled order failed it, and
+	// tidying up after those tests failed it every time.
+	for _, id := range []string{"zzz-last", "aaa-first"} {
+		Register(id, func() Plugin { return &recorder{} })
+		unregisterAfter(t, id)
+	}
+
 	ids := Registered()
-	if len(ids) == 0 {
-		t.Fatal("no plugins are registered")
+	if !slices.Contains(ids, "aaa-first") || !slices.Contains(ids, "zzz-last") {
+		t.Fatalf("Registered() = %v, missing what was just registered", ids)
 	}
 	// Sorted, so a list rendered from it does not shuffle.
-	for i := 1; i < len(ids); i++ {
-		if ids[i-1] > ids[i] {
-			t.Fatalf("Registered() is not sorted: %v", ids)
-		}
+	if !slices.IsSorted(ids) {
+		t.Fatalf("Registered() is not sorted: %v", ids)
 	}
 }
 
@@ -228,12 +241,30 @@ func TestLookupOfAnUnknownPlugin(t *testing.T) {
 func TestDuplicateRegistrationPanics(t *testing.T) {
 	// A build-time mistake, so it fails loudly rather than silently replacing
 	// somebody else's plugin.
+	//
+	// The first registration is undone afterwards. Left in place, a second run
+	// of this test in the same binary panicked on that line instead of the one
+	// under test, and recovered from it — passing while asserting nothing.
+	Register("duplicate-test", func() Plugin { return &recorder{} })
+	unregisterAfter(t, "duplicate-test")
+
 	defer func() {
 		if recover() == nil {
 			t.Fatal("registering the same id twice did not panic")
 		}
 	}()
+	Register("duplicate-test", func() Plugin { return &recorder{} })
+}
 
-	Register("duplicate-test", func() Plugin { return &recorder{} })
-	Register("duplicate-test", func() Plugin { return &recorder{} })
+// unregisterAfter removes a test's registration when it ends. The registry is
+// global and a test name is only unique within one run, so anything a test puts
+// in it has to come back out — otherwise -count=2 is a duplicate registration
+// and the surviving entries leak into whatever runs next.
+func unregisterAfter(t *testing.T, id string) {
+	t.Helper()
+	t.Cleanup(func() {
+		registryMu.Lock()
+		delete(registry, id)
+		registryMu.Unlock()
+	})
 }

@@ -48,9 +48,16 @@ func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)
 // resetFlags gives run() a clean FlagSet. It registers its flags on the
 // default one, which would panic on a redefinition the second time a test
 // calls it.
+//
+// The empty Parse at the end is not decoration. testing reads its own flags
+// through the default FlagSet and panics with "Verbose called before Parse" if
+// it finds an unparsed one — so a fresh set left as-is turns whichever test
+// happens to run last into a panic that names something it never touched. It
+// took a shuffled run to see it, because the order decides who gets blamed.
 func resetFlags() {
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 	flag.CommandLine.SetOutput(io.Discard)
+	_ = flag.CommandLine.Parse(nil)
 }
 
 func TestEnvOr(t *testing.T) {

@@ -8,10 +8,10 @@
 # second, unauthenticated door on the same server — mqttview refuses requests
 # that did not come through the Supervisor, so it would be a door to a refusal
 # page, but a port nobody needs is a port nobody should open.
-name: mqttview
+name: mqttview (Home Assistant config access)
 version: "0.2.0"
-slug: mqttview
-description: A realtime web UI for MQTT brokers, with Home Assistant discovery and a Beckhoff PLC panel
+slug: mqttview_hassconfig
+description: mqttview, plus read access to Home Assistant's configuration so it can pick up the broker from the MQTT integration
 url: https://github.com/dgprivate/mqttview
 # Home Assistant's names, which do not match Docker's: armv7 is linux/arm/v7
 # and armhf is linux/arm/v6. The published image carries all four, so no
@@ -44,11 +44,6 @@ panel_admin: false
 init: false
 startup: services
 
-# /data is the add-on's own persistent directory; the database and the
-# encryption key live there and survive an add-on update.
-map:
-  - addon_config:rw
-
 # The Home Assistant MQTT integration's broker settings, so the app can offer
 # to connect to the same broker without anybody typing it twice.
 services:
@@ -59,6 +54,25 @@ services:
 # reported "no Supervisor token" and skipped the import, correctly, because
 # there was nothing to authenticate with.
 hassio_api: true
+
+# The difference between this app and the plain one, and the only difference.
+#
+# Read access to the Home Assistant configuration directory, so the broker in
+# the MQTT integration can be read from .storage and added without anybody
+# retyping it — and read access to /ssl, because the integration stores
+# certificate paths rather than certificates.
+#
+# What that grants is larger than what it is for: the same directory holds
+# secrets.yaml and the credentials of every other integration. A mapping is
+# granted at install and cannot be declined, which is why this is a separate
+# app rather than an option — an option can only decide whether an app uses
+# access it already has.
+#
+# Install the plain mqttview unless you specifically want this.
+map:
+  - addon_config:rw
+  - homeassistant_config:ro
+  - ssl:ro
 
 options:
   import_mqtt: true

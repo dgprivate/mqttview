@@ -11,9 +11,14 @@ server, `internal/` is everything it does, `web/` is the UI, and
 `cmd/mqttview-mcp` is a separate binary that exposes the PLC plugin over MCP.
 
 It ships three ways: the binary, the hardened container image, and a Home
-Assistant add-on in `addon/` that wraps the same image. `custom_components/` is
-a HACS integration that only adds a sidebar link — it is not the add-on and
-does not remove the login.
+Assistant app that wraps the same image. There are two of those, `addon/` and
+`addon-hassconfig/`, and they are the same app with different permissions: the
+second maps Home Assistant's configuration directory read-only so it can pick
+the broker up from the MQTT integration. Everything except four fields of
+`config.yaml` is byte-identical between them and a test enforces that, so a
+change goes in `addon/` and gets copied. `custom_components/` is a HACS
+integration that only adds a sidebar link — it is not the app and does not
+remove the login.
 
 Data lives in one SQLite file plus an encryption key beside it. There is no
 other state: no cache to warm, no queue, no second service.
@@ -61,6 +66,31 @@ Write tests that state a property, not tests that restate the implementation:
   test. "UseRecoveryCode was called" is not.
 - When a fuzzer or a linter finds something, commit the input as a regression
   test. `internal/plugins/hass/testdata/fuzz/` exists for exactly that.
+
+### The component suites
+
+`test/` holds the two end-to-end suites, and they cover the parts no unit test
+can reach:
+
+- **`test/homeassistant`** builds the real binary, runs an app's real `run.sh`
+  against a fake Supervisor, and asserts every mode: standalone with a login,
+  ingress without one, both apps' broker discovery paths, and the shape the
+  Supervisor requires of the repository. The two apps are compared field by
+  field so they cannot drift apart.
+- **`test/mosquitto`** talks to a real Mosquitto — every transport (TCP, TLS,
+  mutual TLS, WebSockets, secure WebSockets, Unix socket) against every
+  protocol version, plus retained values, wills, sessions and reconnection. A
+  TCP relay in front of the broker (`link_test.go`) is what makes wills and
+  reconnects testable at all: the client API has no way to vanish, and killing
+  the broker breaks both ends at once.
+
+They found four real defects the day they were written, including an app option
+that had never worked. If you change `run.sh`, a manifest, the client or the
+ingress path, these are the tests that will tell you.
+
+Both skip themselves when what they need is missing — `mosquitto`, `jq`, a
+built frontend. CI installs those and then **counts the skips**, because a
+suite that quietly skips itself is worse than no suite.
 
 Anything that parses input from a broker, a device or a person gets a fuzz
 target. `go test -fuzz` targets live beside the code they exercise; the CI job

@@ -61,8 +61,12 @@ jobs:
           ignore: brands
 
   addon:
-    name: Add-on
+    name: App (${{ matrix.app }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [addon, addon-hassconfig]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
         with:
@@ -76,12 +80,35 @@ jobs:
       - name: Lint the add-on
         uses: frenck/action-addon-linter@v2
         with:
-          path: ./addon
+          path: ./${{ matrix.app }}
 
       - name: Check the run script
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
-          shellcheck addon/run.sh
+          shellcheck ${{ matrix.app }}/run.sh
+
+      - name: The two apps differ only where they are meant to
+        run: |
+          # They are the same app with different permissions. Anything else
+          # drifting between them is a bug that will be found by one person
+          # having a feature the other does not.
+          set -euo pipefail
+          for f in Dockerfile run.sh build.yaml translations/en.yaml; do
+            diff -q "addon/${f}" "addon-hassconfig/${f}"
+          done
+          echo "the shared files are identical"
+
+          python3 - <<'PY'
+          import yaml
+          a = yaml.safe_load(open("addon/config.yaml"))
+          b = yaml.safe_load(open("addon-hassconfig/config.yaml"))
+          differ = {k for k in set(a) | set(b) if a.get(k) != b.get(k)}
+          allowed = {"name", "slug", "description", "map"}
+          extra = differ - allowed
+          assert not extra, f"the manifests differ in {sorted(extra)}, which is more than permissions"
+          assert differ, "the manifests are identical, so one of them grants nothing extra"
+          print("the manifests differ only in", sorted(differ))
+          PY
 
       - name: The pinned mqttview image exists
         run: |
@@ -89,14 +116,14 @@ jobs:
           # was never published is an app that fails to build on somebody's
           # Home Assistant, at install time, with a Docker error.
           set -euo pipefail
-          image=$(grep -oP 'MQTTVIEW_IMAGE: \K\S+' addon/build.yaml)
+          image=$(grep -oP 'MQTTVIEW_IMAGE: \K\S+' ${{ matrix.app }}/build.yaml)
           echo "pinned to ${image}"
           docker manifest inspect "${image}" > /dev/null
           echo "the pinned image is published"
 
           # And it has to be the same one the Dockerfile defaults to, or a
           # local build and a Supervisor build produce different binaries.
-          default=$(grep -oP 'ARG MQTTVIEW_IMAGE=\K\S+' addon/Dockerfile)
+          default=$(grep -oP 'ARG MQTTVIEW_IMAGE=\K\S+' ${{ matrix.app }}/Dockerfile)
           [ "${image}" = "${default}" ] || {
             echo "build.yaml pins ${image} but the Dockerfile defaults to ${default}"
             exit 1
@@ -111,8 +138,8 @@ jobs:
           # when that is wrong — which cost an evening to work out once.
           set -euo pipefail
           test -f repository.yaml || { echo "repository.yaml must be in the root"; exit 1; }
-          test -f addon/config.yaml || { echo "addon/config.yaml is missing"; exit 1; }
-          echo "repository.yaml in the root, addon/config.yaml beside it"
+          test -f ${{ matrix.app }}/config.yaml || { echo "${{ matrix.app }}/config.yaml is missing"; exit 1; }
+          echo "repository.yaml in the root, ${{ matrix.app }}/config.yaml beside it"
 
       - name: The options the add-on writes are a configuration mqttview accepts
         run: |
@@ -126,6 +153,6 @@ jobs:
                  "frame_ancestors":[]}' | sudo tee /data/options.json > /dev/null
 
           sed 's|^exec .*||; s|^ *-config.*||; s|^ *-log-level.*||' \
-            addon/run.sh | sudo bash
+            ${{ matrix.app }}/run.sh | sudo bash
 
           go run ./cmd/mqttview -config /data/mqttview.yaml -check-config

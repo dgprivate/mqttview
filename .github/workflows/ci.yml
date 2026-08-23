@@ -45,7 +45,40 @@ jobs:
       # The tests start a real in-process MQTT broker, so the race detector is
       # worth the extra minute here.
       - name: Test
-        run: go test -race -timeout 5m ./...
+        run: go test -race -timeout 10m ./cmd/... ./internal/...
+
+      # Installed rather than skipped. test/mosquitto skips itself when the
+      # broker is missing, which on a runner would mean a green build that
+      # checked none of the transports.
+      - name: Install Mosquitto
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mosquitto mosquitto-clients
+          sudo systemctl stop mosquitto || true
+          sudo systemctl disable mosquitto || true
+
+      # The end-to-end suites: the app's start script and the real binary
+      # (test/homeassistant), and every transport against a real broker
+      # (test/mosquitto). Separate from the unit tests because a failure here
+      # means something between the parts broke, not something inside one.
+      - name: Component tests
+        run: go test -race -timeout 15m ./test/...
+
+      # A skip is a test that did not run, and a suite that quietly skips
+      # itself is worse than no suite. Both of these have skip conditions —
+      # missing mosquitto, missing jq, a frontend that was not built — so the
+      # count is checked rather than trusted.
+      - name: No component test skipped
+        run: |
+          set -euo pipefail
+          go test -timeout 15m -v ./test/... > /tmp/component.log 2>&1 || true
+          skipped=$(grep -c -- '--- SKIP' /tmp/component.log || true)
+          echo "${skipped} skipped"
+          if [ "${skipped}" -gt 1 ]; then
+            grep -- '--- SKIP' -A 2 /tmp/component.log
+            echo "too many component tests skipped; the runner is missing something they need"
+            exit 1
+          fi
 
       # A floor rather than a target. It exists so coverage cannot quietly rot:
       # a change that deletes tests fails here instead of being noticed months
@@ -63,7 +96,7 @@ jobs:
       # run has room and a deleted test still fails the build.
       - name: Coverage
         run: |
-          go test -coverpkg=./internal/...,./cmd/... -coverprofile=coverage.out ./...
+          go test -coverpkg=./internal/...,./cmd/... -coverprofile=coverage.out ./cmd/... ./internal/...
           go tool cover -func=coverage.out | tail -1
 
           total=$(go tool cover -func=coverage.out | tail -1 | grep -oE '[0-9]+\.[0-9]+')
