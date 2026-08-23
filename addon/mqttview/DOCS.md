@@ -58,6 +58,14 @@ Extra origins allowed to embed the mqttview UI in an iframe. Ingress does not
 need this; it is here for people also reaching the same instance from
 somewhere else.
 
+## Where this comes from
+
+Source, issues and the rest of the documentation:
+<https://github.com/dgprivate/mqttview>. The add-on builds on the same image
+that is published as
+[`hausbit/mqttview`](https://hub.docker.com/r/hausbit/mqttview), so the binary
+in here is the one anybody else runs.
+
 ## Data
 
 Everything lives in the add-on's `/data`: the SQLite database, the encryption

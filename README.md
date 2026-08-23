@@ -16,6 +16,10 @@ A realtime web UI for MQTT brokers — every protocol version, every transport,
 proper authentication, and a plugin system that can turn raw topics into
 something you actually recognise.
 
+Published as [`hausbit/mqttview`](https://hub.docker.com/r/hausbit/mqttview) for
+`linux/amd64` and `linux/arm64`, signed, with an SBOM inside the image. There is
+a [Home Assistant add-on](docs/HOME_ASSISTANT.md) too, and it needs no login.
+
 mqttview is a single Go binary with the frontend embedded. Point it at a
 broker and you get a live topic tree, a message stream, a publisher, and — with
 the bundled Home Assistant plugin — a device view built from MQTT discovery

@@ -92,6 +92,20 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Sync the Docker Hub description
+        # The overview on Docker Hub is the first thing anybody reads, and it
+        # is the one piece of documentation that lives outside the repository —
+        # so it is written here and pushed on every publish rather than edited
+        # in a web form and left to drift.
+        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa  # v5.0.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: hausbit/mqttview
+          short-description: Realtime web UI for MQTT brokers, with Home Assistant discovery and a Beckhoff PLC panel
+          readme-filepath: ./docs/DOCKERHUB.md
+          enable-url-completion: true
+
       - name: Install cosign
         uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5  # v3.10.1
 

@@ -16,3 +16,6 @@ one. The `custom_components/mqttview` integration in this repository *is*
 installable through HACS, and is the option for Home Assistant Container
 installs, which have no add-ons at all — see the same document for which one
 fits.
+
+The image behind the add-on is
+[`hausbit/mqttview`](https://hub.docker.com/r/hausbit/mqttview).

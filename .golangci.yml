@@ -22,6 +22,28 @@ linters:
     - gosec
     - copyloopvar
     - prealloc
+    # internal/store is hand-written database/sql. A Rows left open holds a
+    # connection until the GC gets to it, and a Rows whose Err is never checked
+    # reports a truncated result set as a complete one — the second is the
+    # nastier of the two, because it looks like data.
+    - sqlclosecheck
+    - rowserrcheck
+    # Every outbound request in here — OIDC discovery, SAML metadata, the MCP
+    # client — must carry the caller's context, or a shutdown waits on a fetch
+    # nobody can cancel.
+    - noctx
+    # A duration multiplied by a duration is nanoseconds squared, and compiles.
+    - durationcheck
+    # json.Marshal of a channel or a func returns an error nobody expects, and
+    # the value silently becomes null.
+    - errchkjson
+    # append to a slice made with a length rather than a capacity leaves the
+    # zero values in front of the data.
+    - makezero
+    - unconvert
+    - wastedassign
+    # Comments are read more than the code around them.
+    - misspell
 
   settings:
     gosec:
@@ -52,9 +74,30 @@ linters:
         - G118
     staticcheck:
       checks: ["all"]
+    misspell:
+      ignore-rules:
+        # The broker is spelled Mosquitto. misspell's dictionary reads it as a
+        # typo for the insect.
+        - mosquitto
+        # A deliberately mistyped field in internal/httpx/json_test.go, which
+        # is what DisallowUnknownFields is being tested with.
+        - nmae
 
   exclusions:
     rules:
+      # noctx on database/sql: internal/store takes no context, so every query
+      # here is flagged. Threading one through would mean a cancelled request
+      # cancels its query — worth real money against a network database, and
+      # close to nothing against a local SQLite file where a query is measured
+      # in microseconds. It is excluded here rather than repo-wide because the
+      # linter's actual value is outbound HTTP: OIDC discovery, SAML metadata,
+      # the MCP client, all of which do carry a context and must keep doing so.
+      - path: internal/store/
+        linters: [noctx]
+      # The test broker binds a port to find a free one and to check the
+      # broker took it. There is no request to cancel.
+      - path: internal/testutil/
+        linters: [noctx]
       # G705 XSS taint: serveIndex writes index.html with the base href
       # rewritten from X-Ingress-Path. The taint analysis sees a header
       # reaching a Write and stops there; it cannot see the two things that
@@ -72,8 +115,15 @@ linters:
         linters: [gosec]
       # Tests set up adversarial conditions on purpose, and a response body in
       # a test dies with the test.
+      #
+      # noctx is here for the same reason it is not switched off globally: its
+      # value is catching a context-less outbound request in the server, and it
+      # found none — every HTTP call in cmd/ and internal/ already carries one.
+      # A request in a test is bounded by `go test -timeout` and dies with the
+      # binary, so threading a context through fifty call sites would buy
+      # nothing. If it ever fires outside a test, that is the case it is for.
       - path: _test\.go
-        linters: [gosec, errcheck, bodyclose, prealloc]
+        linters: [gosec, errcheck, bodyclose, prealloc, errchkjson, noctx]
       # A deferred Close on a read path has nothing to report and nowhere to
       # report it; the write paths check theirs.
       - source: 'defer .*\.Close\(\)'
