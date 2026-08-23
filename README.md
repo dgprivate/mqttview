@@ -205,6 +205,14 @@ Settings → **Apps** → ⋮ → Repositories → add
 Add-ons. From a terminal on the host it is
 `ha store add https://github.com/dgprivate/mqttview`.)
 
+The repository offers the app twice. **mqttview** is the one to install.
+**mqttview (Home Assistant config access)** is the same binary with one extra
+permission: read access to the configuration directory, so it can import the
+broker from your MQTT integration — username, password, CA and client
+certificate — rather than asking you to enter it a second time. That access
+cannot be an option on the plain app, because a mapping is granted at install
+and an option can only decide whether an app uses access it already has.
+
 No port is published, and mqttview refuses any request that did not come
 through the Supervisor — that check is what makes the identity headers worth
 anything.

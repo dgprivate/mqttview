@@ -70,11 +70,16 @@ badge.
 
 ## Home Assistant
 
-There is an add-on, and it needs no login: under ingress, Home Assistant has
-already decided who you are.
+There is an app (Home Assistant renamed add-ons to apps), and it needs no
+login: under ingress, Home Assistant has already decided who you are.
 
-Settings → Add-ons → Add-on Store → ⋮ → Repositories →
-`https://github.com/dgprivate/mqttview`
+Settings → Apps → ⋮ → Repositories → `https://github.com/dgprivate/mqttview`
+
+Two apps are offered there. **mqttview** is the one to install; **mqttview
+(Home Assistant config access)** is the same app allowed to read your
+configuration directory, so it can import the broker from your MQTT
+integration — credentials and client certificates included — instead of asking
+you to retype it.
 
 Running Home Assistant Container or Core, which have no add-ons? Run this image
 and add the sidebar link with the HACS integration in the same repository.

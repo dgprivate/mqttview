@@ -24,9 +24,14 @@ device view and a Beckhoff PLC panel from the bundled plugins.
 
 ## Installation
 
-1. Settings → Add-ons → Add-on Store → ⋮ → Repositories
+1. Settings → **Apps** → ⋮ → Repositories (older versions call these
+   "Add-ons")
 2. Add `https://github.com/dgprivate/mqttview`
-3. Install **mqttview**, then Start.
+3. Install **mqttview (Home Assistant config access)**, then Start.
+
+Both apps appear in the list. Installing this one grants the access described
+above; installing the plain **mqttview** grants none of it. They can be
+installed side by side, and each keeps its own brokers.
 
 mqttview appears in the sidebar. There is no login: Home Assistant has already
 decided you may open the panel, and asking again would be a second password to
