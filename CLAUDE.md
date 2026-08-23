@@ -140,10 +140,11 @@ is a silent authentication bypass, not a visible bug. Keep both dependencies
 current: govulncheck caught a signature-bypass advisory in goxmldsig within
 minutes of it being added here, and that is the whole reason the job exists.
 
-**Never guess at a protocol.** The PLC command schema came from reading
-`FB_MqttCommandProcessor.TcPOU` in the podlipa-plc repository, not from a
+**Never guess at a protocol.** The PLC command schema came from reading the
+command processor's source on the Beckhoff PLC that publishes it, not from a
 plausible-looking example. If the authority for a format is not to hand, say so
-instead of inferring one.
+instead of inferring one — the Home Assistant ingress headers are the current
+example of the second half of that rule.
 
 ## Frontend
 
