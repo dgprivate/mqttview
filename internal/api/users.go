@@ -50,6 +50,10 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if !store.ValidEmail(req.Email) {
+		httpx.WriteError(w, http.StatusBadRequest, "email must be a valid address")
+		return
+	}
 	if store.NormalizeEmail(req.Email) == "" {
 		httpx.WriteError(w, http.StatusBadRequest, "email is required")
 		return
@@ -136,6 +140,10 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !store.ValidEmail(req.Email) {
+		httpx.WriteError(w, http.StatusBadRequest, "email must be a valid address")
+		return
+	}
 	existing.Email = req.Email
 	existing.Name = req.Name
 	existing.Role = req.Role

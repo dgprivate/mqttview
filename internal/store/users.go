@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/mail"
 	"strings"
 	"time"
 )
@@ -69,6 +70,17 @@ func (u User) TwoFactorEnabled() bool {
 // NormalizeEmail lowercases and trims an address so lookups are consistent.
 func NormalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
+}
+
+// ValidEmail reports whether an address is one an account can be created with.
+//
+// net/mail rather than a regular expression of our own: it accepts
+// "admin@localhost", which is what a first run bootstraps with and what a
+// stricter rule would reject, and it refuses the strings that would break SSO
+// linking, which matches accounts by address.
+func ValidEmail(email string) bool {
+	addr, err := mail.ParseAddress(NormalizeEmail(email))
+	return err == nil && addr.Address == NormalizeEmail(email)
 }
 
 const userColumns = `id, email, name, password_hash, role, provider, provider_subject, disabled, created_at, last_login_at, totp_secret_enc, totp_confirmed_at`
@@ -199,8 +211,13 @@ func (s *Store) LinkProvider(id, provider, subject string) error {
 
 // TouchLogin records a successful login.
 func (s *Store) TouchLogin(id string) error {
-	_, err := s.db.Exec(`UPDATE users SET last_login_at = ? WHERE id = ?`, nowString(), id)
-	return err
+	// Reports a missing row like every other update here does. The caller only
+	// logs it, but a silent no-op would be the odd one out in this file.
+	res, err := s.db.Exec(`UPDATE users SET last_login_at = ? WHERE id = ?`, nowString(), id)
+	if err != nil {
+		return fmt.Errorf("store: record login time: %w", err)
+	}
+	return affected(res)
 }
 
 // DeleteUser removes an account and, by cascade, its sessions.

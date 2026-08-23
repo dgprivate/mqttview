@@ -217,16 +217,21 @@ export const api = {
     request<HassDevice[]>(
       `/api/p/home-assistant/devices${connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : ''}`,
     ),
+  /**
+   * The entity ID and the device key both contain the discovery topic, slashes
+   * and all, so they travel in the body: a path parameter cannot hold them and
+   * percent-encoding does not survive Go's path decoding.
+   */
   hassCommand: (entityId: string, action: string, value = '') =>
-    request<{ topic: string; payload: string }>(
-      `/api/p/home-assistant/entities/${encodeURIComponent(entityId)}/command`,
-      { method: 'POST', body: JSON.stringify({ action, value }) },
-    ),
+    request<{ topic: string; payload: string }>('/api/p/home-assistant/command', {
+      method: 'POST',
+      body: JSON.stringify({ entityId, action, value }),
+    }),
   hassPin: (deviceKey: string, connectionId: string, pinned: boolean) =>
-    request<{ pinned: boolean }>(
-      `/api/p/home-assistant/devices/${encodeURIComponent(deviceKey)}/pin`,
-      { method: 'POST', body: JSON.stringify({ connectionId, pinned }) },
-    ),
+    request<{ pinned: boolean }>('/api/p/home-assistant/pin', {
+      method: 'POST',
+      body: JSON.stringify({ deviceKey, connectionId, pinned }),
+    }),
 
   // --- beckhoff plc plugin ---
   plcStatus: () => request<PlcStatus>('/api/p/beckhoff-plc/status'),

@@ -1,12 +1,18 @@
 package auth
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewjam/saml"
 
@@ -263,3 +269,199 @@ const testIDPMetadata = `<?xml version="1.0"?>
                          Location="https://idp.example.com/sso"/>
   </IDPSSODescriptor>
 </EntityDescriptor>`
+
+// The redirect out to the identity provider, and everything that can go wrong
+// on the way back. A SAML flow that fails open is an authentication bypass, so
+// every one of these has to be a refusal.
+
+func TestStartSAMLRedirectsAndRemembersTheRequest(t *testing.T) {
+	s := newSAMLTestService(t)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/auth/saml/work/start", nil)
+
+	redirect, err := s.StartSAML(w, r, "work", "/connections")
+	if err != nil {
+		t.Fatalf("StartSAML: %v", err)
+	}
+	if !strings.HasPrefix(redirect, "https://idp.example.com/sso?") {
+		t.Errorf("redirect = %q, want the identity provider's SSO endpoint", redirect)
+	}
+	if !strings.Contains(redirect, "SAMLRequest=") {
+		t.Error("the redirect carries no SAMLRequest")
+	}
+
+	cookies := w.Result().Cookies()
+	var state *http.Cookie
+	for _, c := range cookies {
+		if c.Name == samlCookie {
+			state = c
+		}
+	}
+	if state == nil {
+		t.Fatalf("no state cookie was set: %+v", cookies)
+	}
+	// SameSite=None, because the assertion comes back as a cross-site POST and
+	// a Lax cookie would simply not be sent. None requires Secure.
+	if state.SameSite != http.SameSiteNoneMode || !state.Secure {
+		t.Errorf("state cookie = %+v", state)
+	}
+	if !state.HttpOnly {
+		t.Error("the state cookie is readable from JavaScript")
+	}
+}
+
+func TestStartSAMLOnAProviderThatIsNotConfigured(t *testing.T) {
+	s := newSAMLTestService(t)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/auth/saml/nope/start", nil)
+
+	if _, err := s.StartSAML(w, r, "nope", ""); err == nil {
+		t.Fatal("an unknown provider produced a redirect")
+	}
+	if _, err := s.SAMLMetadata(t.Context(), "nope"); err == nil {
+		t.Error("an unknown provider produced metadata")
+	}
+}
+
+func TestAnAssertionWithoutValidStateIsRefused(t *testing.T) {
+	s := newSAMLTestService(t)
+
+	post := func(cookie *http.Cookie) error {
+		form := url.Values{"SAMLResponse": {"not-an-assertion"}}
+		r := httptest.NewRequest(http.MethodPost, "/api/auth/saml/work/acs",
+			strings.NewReader(form.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if cookie != nil {
+			r.AddCookie(cookie)
+		}
+		_, _, err := s.CompleteSAML(httptest.NewRecorder(), r, "work")
+		return err
+	}
+
+	// No cookie at all: the browser that started the login is not this one.
+	if err := post(nil); err == nil {
+		t.Error("an assertion with no login state was accepted")
+	}
+	// A cookie that is not ours: the sealed value will not open.
+	if err := post(&http.Cookie{Name: samlCookie, Value: "bm90LW91cnM"}); err == nil {
+		t.Error("a forged state cookie was accepted")
+	}
+	// Our own encoding, but expired: replaying yesterday's login must not work.
+	if err := post(sealedState(t, s, samlState{
+		Provider: "work", RequestID: "id-1", Expires: time.Now().Add(-time.Minute).Unix(),
+	})); err == nil {
+		t.Error("an expired login state was accepted")
+	}
+	// Valid state, but issued for a different provider.
+	if err := post(sealedState(t, s, samlState{
+		Provider: "other", RequestID: "id-1", Expires: time.Now().Add(time.Minute).Unix(),
+	})); err == nil {
+		t.Error("state from another provider was accepted")
+	}
+	// Valid state, and the response is still not a signed assertion.
+	if err := post(sealedState(t, s, samlState{
+		Provider: "work", RequestID: "id-1", Expires: time.Now().Add(time.Minute).Unix(),
+	})); err == nil {
+		t.Error("an unsigned response was accepted")
+	}
+}
+
+func TestIdentityProviderMetadataThatCannotBeUsed(t *testing.T) {
+	dir := t.TempDir()
+
+	write := func(name, body string) string {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+
+	s := newSAMLTestService(t)
+
+	for name, cfg := range map[string]config.SAMLProviderConfig{
+		"a file that is not there": {MetadataFile: filepath.Join(dir, "absent.xml")},
+		"a file that is not XML":   {MetadataFile: write("junk.xml", "this is not xml")},
+		"metadata describing no identity provider": {MetadataFile: write("empty.xml",
+			`<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="x"/>`)},
+		"neither a URL nor a file": {},
+	} {
+		if _, err := s.fetchIDPMetadata(t.Context(), cfg); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+}
+
+func TestMetadataWrappedInAnEntitiesDescriptorIsAccepted(t *testing.T) {
+	// ADFS and Shibboleth publish a federation document wrapping the entity,
+	// which is well-formed SAML and has to work.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "entities.xml")
+	body := `<?xml version="1.0"?>
+<EntitiesDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata">` +
+		strings.TrimPrefix(testIDPMetadata, `<?xml version="1.0"?>`) +
+		`</EntitiesDescriptor>`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := newSAMLTestService(t)
+	descriptor, err := s.fetchIDPMetadata(t.Context(), config.SAMLProviderConfig{MetadataFile: path})
+	if err != nil {
+		t.Fatalf("a wrapped descriptor was refused: %v", err)
+	}
+	if descriptor.EntityID != "https://idp.example.com/metadata" {
+		t.Errorf("entity ID = %q", descriptor.EntityID)
+	}
+}
+
+func TestMetadataFetchedOverHTTP(t *testing.T) {
+	s := newSAMLTestService(t)
+
+	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(testIDPMetadata))
+	}))
+	defer ok.Close()
+
+	if _, err := s.fetchIDPMetadata(t.Context(),
+		config.SAMLProviderConfig{MetadataURL: ok.URL}); err != nil {
+		t.Errorf("metadata over HTTP was refused: %v", err)
+	}
+
+	// A provider that answers with an error page must not be treated as one
+	// that published metadata.
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer bad.Close()
+
+	if _, err := s.fetchIDPMetadata(t.Context(),
+		config.SAMLProviderConfig{MetadataURL: bad.URL}); err == nil {
+		t.Error("a 404 was accepted as metadata")
+	}
+	if _, err := s.fetchIDPMetadata(t.Context(),
+		config.SAMLProviderConfig{MetadataURL: "http://127.0.0.1:1/metadata"}); err == nil {
+		t.Error("an unreachable metadata URL was accepted")
+	}
+}
+
+// sealedState builds the login-state cookie the SAML flow sets, so a test can
+// present one the service will accept as its own.
+func sealedState(t *testing.T, s *Service, st samlState) *http.Cookie {
+	t.Helper()
+	payload, err := json.Marshal(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := s.box.Seal(string(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &http.Cookie{
+		Name:  samlCookie,
+		Value: base64.RawURLEncoding.EncodeToString([]byte(sealed)),
+	}
+}

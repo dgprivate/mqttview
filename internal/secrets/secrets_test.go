@@ -1,6 +1,8 @@
 package secrets
 
 import (
+	"encoding/base64"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -180,4 +182,111 @@ func truncate(s string) string {
 		return s
 	}
 	return s[:40] + "…"
+}
+
+// The key file is the whole security boundary for everything at rest, so its
+// handling has to be exact rather than approximately right.
+
+func TestTheKeyFileIsCreatedOnceAndReused(t *testing.T) {
+	dir := t.TempDir()
+
+	first, err := LoadOrCreateKey("", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := LoadOrCreateKey("", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A new key on every start would make every stored password unreadable.
+	if first != second {
+		t.Fatal("a second call generated a different key")
+	}
+
+	info, err := os.Stat(filepath.Join(dir, "secret.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("secret.key is mode %o, want 600", perm)
+	}
+}
+
+func TestAnUnusableKeyFileIsReportedRatherThanReplaced(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secret.key")
+	if err := os.WriteFile(path, []byte("this is not a key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Overwriting it would silently destroy every secret already encrypted
+	// with the real key, so the only safe answer is to refuse to start.
+	_, err := LoadOrCreateKey("", dir)
+	if err == nil {
+		t.Fatal("a corrupt key file was accepted")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("error %q does not name the file", err)
+	}
+	raw, _ := os.ReadFile(path)
+	if string(raw) != "this is not a key\n" {
+		t.Error("the unusable key file was overwritten")
+	}
+}
+
+func TestAConfiguredKeyIsValidatedBeforeUse(t *testing.T) {
+	dir := t.TempDir()
+
+	if _, err := LoadOrCreateKey("too short", dir); err == nil {
+		t.Error("a short key was accepted")
+	}
+	// A configured key must not cause a file to be written: the operator has
+	// chosen to keep it somewhere else.
+	if _, err := os.Stat(filepath.Join(dir, "secret.key")); !os.IsNotExist(err) {
+		t.Error("a key file was written even though a key was configured")
+	}
+
+	// Both encodings are accepted, because both appear in the wild.
+	raw := make([]byte, 32)
+	for i := range raw {
+		raw[i] = byte(i)
+	}
+	for name, encoded := range map[string]string{
+		"hex":    hex.EncodeToString(raw),
+		"base64": base64.StdEncoding.EncodeToString(raw),
+	} {
+		got, err := LoadOrCreateKey(encoded, dir)
+		if err != nil || got != encoded {
+			t.Errorf("%s key: %q %v", name, got, err)
+		}
+	}
+}
+
+func TestCiphertextThatCannotBeOpened(t *testing.T) {
+	box := newBox(t)
+
+	for name, input := range map[string]string{
+		"not base64":    "!!!!",
+		"too short":     base64.StdEncoding.EncodeToString([]byte("short")),
+		"a wrong nonce": base64.StdEncoding.EncodeToString(make([]byte, 40)),
+	} {
+		if _, err := box.Open(input); err == nil {
+			t.Errorf("%s was opened", name)
+		}
+	}
+}
+
+func TestAValueSealedWithAnotherKeyIsNotSilentlyEmpty(t *testing.T) {
+	a := newBox(t)
+	b := newBox(t)
+
+	sealed, err := a.Seal("broker-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Returning "" here would look to a caller like an account with no
+	// password, and it would try to connect without one.
+	if got, err := b.Open(sealed); err == nil {
+		t.Fatalf("another key opened it and returned %q", got)
+	}
 }

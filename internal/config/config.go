@@ -186,14 +186,14 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("MQTTVIEW_BASE_URL"); v != "" {
 		cfg.BaseURL = v
 	}
-	if v := os.Getenv("MQTTVIEW_REQUIRE_TWO_FACTOR"); v != "" {
-		cfg.Auth.RequireTwoFactor = v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")
+	if v, ok := boolEnv("MQTTVIEW_REQUIRE_TWO_FACTOR"); ok {
+		cfg.Auth.RequireTwoFactor = v
 	}
 	if v := os.Getenv("MQTTVIEW_TWO_FACTOR_ISSUER"); v != "" {
 		cfg.Auth.TwoFactorIssuer = v
 	}
-	if v := os.Getenv("MQTTVIEW_TRUST_PROXY_HEADERS"); v != "" {
-		cfg.Auth.TrustProxyHeaders = v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")
+	if v, ok := boolEnv("MQTTVIEW_TRUST_PROXY_HEADERS"); ok {
+		cfg.Auth.TrustProxyHeaders = v
 	}
 	if v := os.Getenv("MQTTVIEW_DATA_DIR"); v != "" {
 		cfg.DataDir = v

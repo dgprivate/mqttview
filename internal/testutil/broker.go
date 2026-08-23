@@ -4,7 +4,14 @@
 package testutil
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"testing"
 	"time"
@@ -56,6 +63,17 @@ func (b *Broker) Publish(t *testing.T, topic string, payload []byte, retain bool
 	}
 }
 
+// DropClients disconnects every connected client without stopping the broker.
+//
+// From a client's side this is indistinguishable from the broker restarting,
+// which is the event a reconnect loop exists for and the one that is otherwise
+// impossible to provoke in a test.
+func (b *Broker) DropClients() {
+	for _, cl := range b.Server.Clients.GetAll() {
+		cl.Stop(errors.New("testutil: connection dropped"))
+	}
+}
+
 // FreePort reserves and releases a port, returning its number.
 func FreePort(t *testing.T) int {
 	t.Helper()
@@ -79,4 +97,42 @@ func waitForListener(t *testing.T, addr string) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("testutil: broker at %s did not start", addr)
+}
+
+// SelfSignedPEM returns a self-signed certificate and its private key, both
+// PEM encoded.
+//
+// For tests that need TLS material that parses rather than TLS material that
+// is trusted: building a tls.Config, checking that a bad key is refused, and
+// so on.
+func SelfSignedPEM(commonName string) (certPEM, keyPEM string, err error) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return "", "", err
+	}
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return "", "", err
+	}
+
+	tmpl := x509.Certificate{
+		SerialNumber:          serial,
+		Subject:               pkix.Name{CommonName: commonName},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		DNSNames:              []string{commonName},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &key.PublicKey, key)
+	if err != nil {
+		return "", "", err
+	}
+
+	certPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+	keyPEM = string(pem.EncodeToMemory(&pem.Block{
+		Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key),
+	}))
+	return certPEM, keyPEM, nil
 }

@@ -371,9 +371,14 @@ func (p *Plugin) Routes(r chi.Router) {
 	r.Get("/status", p.handleStatus)
 	r.Get("/devices", p.handleDevices)
 	r.Get("/entities", p.handleEntities)
-	r.Get("/entities/{id}", p.handleEntity)
-	r.Post("/entities/{id}/command", p.handleCommand)
-	r.Post("/devices/{key}/pin", p.handlePin)
+	// A wildcard, not "{id}": an entity ID is "<connection>|<discovery topic>"
+	// and therefore contains slashes, which a single-segment parameter cannot
+	// match. Percent-encoding does not help — Go decodes the path before chi
+	// routes it — so these 404ed for every entity there has ever been.
+	r.Get("/entities/*", p.handleEntity)
+	// The ID travels in the body for the same reason.
+	r.Post("/command", p.handleCommand)
+	r.Post("/pin", p.handlePin)
 }
 
 func (p *Plugin) handleStatus(w http.ResponseWriter, _ *http.Request) {
@@ -412,8 +417,11 @@ func (p *Plugin) handleEntity(w http.ResponseWriter, r *http.Request) {
 }
 
 type commandRequest struct {
-	Action string `json:"action"`
-	Value  string `json:"value"`
+	// EntityID is in the body rather than the path because it contains the
+	// discovery topic, slashes and all.
+	EntityID string `json:"entityId"`
+	Action   string `json:"action"`
+	Value    string `json:"value"`
 }
 
 func (p *Plugin) handleCommand(w http.ResponseWriter, r *http.Request) {
@@ -427,16 +435,14 @@ func (p *Plugin) handleCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := entityIDFrom(r)
-	e, ok := p.registry.Entity(id)
-	if !ok {
-		httpx.WriteError(w, http.StatusNotFound, "no such entity")
-		return
-	}
-
 	var req commandRequest
 	if err := httpx.DecodeJSON(w, r, &req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	e, ok := p.registry.Entity(req.EntityID)
+	if !ok {
+		httpx.WriteError(w, http.StatusNotFound, "no such entity")
 		return
 	}
 
@@ -472,19 +478,19 @@ func (p *Plugin) handleCommand(w http.ResponseWriter, r *http.Request) {
 
 type pinRequest struct {
 	ConnectionID string `json:"connectionId"`
-	Pinned       bool   `json:"pinned"`
+	// DeviceKey is in the body for the same reason an entity ID is.
+	DeviceKey string `json:"deviceKey"`
+	Pinned    bool   `json:"pinned"`
 }
 
 func (p *Plugin) handlePin(w http.ResponseWriter, r *http.Request) {
-	key := chi.URLParam(r, "key")
-
 	var req pinRequest
 	if err := httpx.DecodeJSON(w, r, &req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	storeKey, ok := p.registry.SetPinned(req.ConnectionID, key, req.Pinned)
+	storeKey, ok := p.registry.SetPinned(req.ConnectionID, req.DeviceKey, req.Pinned)
 	if !ok {
 		httpx.WriteError(w, http.StatusNotFound, "no such device")
 		return
@@ -499,11 +505,10 @@ func (p *Plugin) handlePin(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"pinned": req.Pinned})
 }
 
-// entityIDFrom reconstructs an entity ID from the URL. Entity IDs embed a
-// topic and therefore contain slashes, so the client sends them URL-encoded
-// and chi hands back the decoded value.
+// entityIDFrom reads the wildcard the entity routes are declared with. An
+// entity ID embeds a discovery topic, so it spans several path segments.
 func entityIDFrom(r *http.Request) string {
-	if id := chi.URLParam(r, "id"); id != "" {
+	if id := chi.URLParam(r, "*"); id != "" {
 		return id
 	}
 	return strings.TrimPrefix(r.URL.Path, "/entities/")

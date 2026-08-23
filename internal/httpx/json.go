@@ -61,6 +61,10 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 			return fmt.Errorf("malformed JSON at byte %d", syntaxErr.Offset)
 		case errors.As(err, &typeErr):
 			return fmt.Errorf("field %q has the wrong type", typeErr.Field)
+		case errors.Is(err, io.ErrUnexpectedEOF):
+			// A truncated body: the encoder gives "unexpected EOF", which tells
+			// a client author nothing about what to look for.
+			return errors.New("malformed JSON: the body ends in the middle of a value")
 		case errors.Is(err, io.EOF):
 			return errors.New("request body is empty")
 		default:

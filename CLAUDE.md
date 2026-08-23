@@ -35,7 +35,12 @@ nothing, because it costs somebody else the time to discover otherwise.
 
 **Every change ships with tests.** Not "where it makes sense" — every change. A
 bug fix ships with the test that fails without it. CI enforces a coverage floor
-of 50%; raise it as the number rises, and never lower it to make a build pass.
+of 90%; raise it as the number rises, and never lower it to make a build pass.
+
+Reaching a number is not the point, and a test written only to touch a line is
+worse than no test: it locks in whatever the code does today. Several of the
+assertions here started out wrong and the *code* was right — check which it is
+before changing either.
 
 Write tests that state a property, not tests that restate the implementation:
 

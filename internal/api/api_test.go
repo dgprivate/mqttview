@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
@@ -12,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/mqttview/mqttview/internal/api"
@@ -43,9 +45,14 @@ type testServer struct {
 	// suppressCSRF omits the header, so a test can prove the check bites.
 	suppressCSRF bool
 	mqtt         *mqttc.Manager
+	// db is exposed so a test can take the database away and check that the
+	// API degrades rather than panics.
+	db *store.Store
+	// opts is kept so a test can rebuild the server with one thing changed.
+	opts api.Options
 }
 
-func newTestServer(t *testing.T) *testServer {
+func newTestServer(t *testing.T, mutate ...func(*config.Config)) *testServer {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -66,6 +73,9 @@ func newTestServer(t *testing.T) *testServer {
 	cfg := config.Default()
 	cfg.DataDir = dir
 	cfg.BaseURL = "http://127.0.0.1"
+	for _, m := range mutate {
+		m(&cfg)
+	}
 
 	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	authSvc := auth.New(db, cfg, box, log)
@@ -85,10 +95,14 @@ func newTestServer(t *testing.T) *testServer {
 	}
 	t.Cleanup(plugins.Stop)
 
-	srv := api.New(api.Options{
+	opts := api.Options{
 		Config: cfg, Log: log, Store: db, Auth: authSvc,
 		MQTT: mgr, Hub: h, Plugins: plugins, Version: "test",
-	})
+		// A stand-in for the built frontend, so the SPA fallback is exercised
+		// and a redirect to /login lands somewhere rather than 404ing.
+		Web: testFrontend(),
+	}
+	srv := api.New(opts)
 
 	httpSrv := httptest.NewServer(srv.Handler())
 	t.Cleanup(httpSrv.Close)
@@ -102,6 +116,8 @@ func newTestServer(t *testing.T) *testServer {
 		http:   httpSrv,
 		client: &http.Client{Jar: jar, Timeout: 30 * time.Second},
 		mqtt:   mgr,
+		db:     db,
+		opts:   opts,
 	}
 	return ts
 }
@@ -176,6 +192,39 @@ func (ts *testServer) login() {
 	if ts.csrfToken() == "" {
 		ts.t.Fatal("login did not set a CSRF cookie")
 	}
+}
+
+// status makes a request and returns only its code, for the many checks whose
+// whole point is which status was chosen.
+func (ts *testServer) status(method, path string, body any) int {
+	ts.t.Helper()
+	resp := ts.do(method, path, body)
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode
+}
+
+// asUser signs a second account in against the same server, with its own cookie
+// jar, so a test can check what a different role is allowed to do.
+func (ts *testServer) asUser(t *testing.T, email, password string) *testServer {
+	t.Helper()
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := &testServer{
+		t:      t,
+		http:   ts.http,
+		client: &http.Client{Jar: jar, Timeout: 30 * time.Second},
+		mqtt:   ts.mqtt,
+		db:     ts.db,
+		opts:   ts.opts,
+	}
+	other.decode(other.do(http.MethodPost, "/api/auth/login", map[string]string{
+		"email": email, "password": password,
+	}), http.StatusOK, nil)
+	return other
 }
 
 func TestUnauthenticatedRequestsAreRejected(t *testing.T) {
@@ -447,4 +496,22 @@ func mustParseURL(t *testing.T, raw string) *url.URL {
 
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())
+}
+
+// testFrontend is the smallest thing the SPA handler will serve: an index and
+// one hashed asset, which is enough to cover both cache-control branches.
+func testFrontend() fs.FS {
+	return fstest.MapFS{
+		"index.html":          {Data: []byte(`<!doctype html><div id="root"></div>`)},
+		"assets/index-abc.js": {Data: []byte("console.log(1)")},
+		"favicon.ico":         {Data: []byte("icon")},
+	}
+}
+
+// emptyFrontend swaps in a filesystem with no index.html, which is what an
+// install looks like when somebody built the binary without building the UI.
+func (ts *testServer) emptyFrontend() {
+	opts := ts.opts
+	opts.Web = fstest.MapFS{}
+	ts.http.Config.Handler = api.New(opts).Handler()
 }

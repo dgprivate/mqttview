@@ -20,6 +20,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -47,24 +48,37 @@ func main() {
 	// Logs must go to stderr: stdout is the MCP transport.
 	log.SetOutput(os.Stderr)
 
+	if err := run(context.Background(), os.Args[1:]); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// run is separate from main so a test can drive it. Everything that goes wrong
+// in practice goes wrong here — a missing password, an unreachable mqttview, a
+// login that is refused — and none of it is reachable through main.
+func run(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("mqttview-mcp", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
 	var (
-		base       = flag.String("url", env("MQTTVIEW_URL", "http://127.0.0.1:8114"), "mqttview base URL")
-		email      = flag.String("email", env("MQTTVIEW_EMAIL", ""), "mqttview login email")
-		password   = flag.String("password", env("MQTTVIEW_PASSWORD", ""), "mqttview password")
-		connection = flag.String("connection", env("MQTTVIEW_CONNECTION_ID", ""), "restrict to one broker connection ID")
+		base       = fs.String("url", env("MQTTVIEW_URL", "http://127.0.0.1:8114"), "mqttview base URL")
+		email      = fs.String("email", env("MQTTVIEW_EMAIL", ""), "mqttview login email")
+		password   = fs.String("password", env("MQTTVIEW_PASSWORD", ""), "mqttview password")
+		connection = fs.String("connection", env("MQTTVIEW_CONNECTION_ID", ""), "restrict to one broker connection ID")
 	)
-	flag.Parse()
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	if *email == "" || *password == "" {
-		log.Fatal("set MQTTVIEW_EMAIL and MQTTVIEW_PASSWORD (or pass -email and -password)")
+		return errors.New("set MQTTVIEW_EMAIL and MQTTVIEW_PASSWORD (or pass -email and -password)")
 	}
 
 	client, err := NewClient(*base, *email, *password)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	// Fail at startup rather than on the first tool call: a broken login is far
@@ -73,13 +87,14 @@ func main() {
 	err = client.Login(loginCtx)
 	cancel()
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	server := newServer(client, *connection)
 	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
-		log.Fatal(err)
+		return err
 	}
+	return nil
 }
 
 func env(key, def string) string {
