@@ -1,13 +1,18 @@
 package store
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/dgprivate/mqttview/internal/mqttc"
+	"github.com/dgprivate/mqttview/internal/secrets"
 )
 
 func TestCreateUserValidatesTheRole(t *testing.T) {
@@ -622,5 +627,106 @@ func TestEveryQueryReportsAFailingDatabase(t *testing.T) {
 		if err := fn(); err == nil {
 			t.Errorf("%s succeeded with a closed database", name)
 		}
+	}
+}
+
+// TestAClientKeyIsNotSittingInTheDatabase is the test that should have existed
+// from the first day the documentation claimed it.
+//
+// Four files said TLS private keys were encrypted at rest. They were not: the
+// password was sealed and the TLS block beside it went in as plain JSON, key
+// and all. Nothing caught it because no test looked at the bytes on disk.
+func TestAClientKeyIsNotSittingInTheDatabase(t *testing.T) {
+	dir := t.TempDir()
+	key, err := secrets.LoadOrCreateKey("", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	box, err := secrets.New(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "test.db")
+	st, err := Open(path, box)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const marker = "-----BEGIN PRIVATE KEY-----\nNOBODYSHOULDSEETHIS\n-----END PRIVATE KEY-----"
+	spec := mqttc.ConnectionSpec{
+		ID: "c1", Name: "secured", URL: "mqtts://broker:8883", Version: mqttc.V311,
+		Password: "hunter2",
+		TLS: mqttc.TLSSpec{
+			ClientCertPEM: "-----BEGIN CERTIFICATE-----\npublic\n-----END CERTIFICATE-----",
+			ClientKeyPEM:  marker,
+		},
+	}
+	if err := st.SaveConnection(ConnectionRecord{Spec: spec}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The file itself, not the API's idea of it.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte("NOBODYSHOULDSEETHIS")) {
+		t.Error("the client private key is in the database file in the clear")
+	}
+	if bytes.Contains(raw, []byte("hunter2")) {
+		t.Error("the broker password is in the database file in the clear")
+	}
+
+	// And it still comes back.
+	st, err = Open(path, box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	got, err := st.GetConnection("c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Spec.TLS.ClientKeyPEM != marker {
+		t.Errorf("the key did not survive the round trip: %.40q", got.Spec.TLS.ClientKeyPEM)
+	}
+	if got.Spec.Password != "hunter2" {
+		t.Errorf("password = %q", got.Spec.Password)
+	}
+}
+
+func TestAConnectionWrittenBeforeTheKeyWasEncryptedStillLoads(t *testing.T) {
+	// An upgrade must not make every existing connection unreadable. A row
+	// holding plain JSON is read as such and re-sealed the next time it is
+	// saved.
+	st := newTestStore(t)
+
+	spec := mqttc.ConnectionSpec{
+		ID: "old", Name: "old", URL: "mqtts://broker:8883", Version: mqttc.V311,
+		TLS: mqttc.TLSSpec{ServerName: "broker.example.com", InsecureSkipVerify: true},
+	}
+	if err := st.SaveConnection(ConnectionRecord{Spec: spec}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Put the column back the way the previous version wrote it.
+	plain, err := json.Marshal(spec.TLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`UPDATE connections SET tls_json = ? WHERE id = ?`, string(plain), "old"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := st.GetConnection("old")
+	if err != nil {
+		t.Fatalf("a connection from an older version failed to load: %v", err)
+	}
+	if got.Spec.TLS.ServerName != "broker.example.com" || !got.Spec.TLS.InsecureSkipVerify {
+		t.Errorf("tls = %+v", got.Spec.TLS)
 	}
 }

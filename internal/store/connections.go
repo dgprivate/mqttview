@@ -23,7 +23,7 @@ const connectionColumns = `id, name, url, version, client_id, username, password
     subscriptions_json, auto_connect, history_size, created_by, created_at, updated_at`
 
 // SaveConnection inserts or replaces a connection definition. The broker
-// password is encrypted before it is written.
+// password and the TLS settings are encrypted before they are written.
 func (s *Store) SaveConnection(rec ConnectionRecord) error {
 	spec := rec.Spec
 	if err := spec.Normalize(); err != nil {
@@ -37,9 +37,18 @@ func (s *Store) SaveConnection(rec ConnectionRecord) error {
 	if err != nil {
 		return fmt.Errorf("store: encrypt broker password: %w", err)
 	}
-	tlsJSON, err := json.Marshal(spec.TLS)
+	// The whole TLS block, not just the key inside it: a client private key is
+	// a credential exactly like the password beside it, and four files in this
+	// repository said it was encrypted while it was going in as plain JSON.
+	// Sealing the block rather than the field keeps it that way whatever gets
+	// added to TLSSpec later.
+	tlsPlain, err := json.Marshal(spec.TLS)
 	if err != nil {
 		return fmt.Errorf("store: encode tls settings: %w", err)
+	}
+	tlsJSON, err := s.box.Seal(string(tlsPlain))
+	if err != nil {
+		return fmt.Errorf("store: encrypt tls settings: %w", err)
 	}
 	subsJSON, err := json.Marshal(spec.Subscriptions)
 	if err != nil {
@@ -81,7 +90,7 @@ func (s *Store) SaveConnection(rec ConnectionRecord) error {
             updated_at = excluded.updated_at`,
 		spec.ID, spec.Name, spec.URL, int(spec.Version), spec.ClientID, spec.Username, passwordEnc,
 		spec.KeepAlive, boolToInt(spec.CleanStart), spec.SessionExpiry, spec.ConnectTimeout,
-		string(tlsJSON), willJSON, string(subsJSON), boolToInt(spec.AutoConnect), spec.HistorySize,
+		tlsJSON, willJSON, string(subsJSON), boolToInt(spec.AutoConnect), spec.HistorySize,
 		nullIfEmpty(rec.CreatedBy), rec.CreatedAt.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("store: save connection: %w", err)
@@ -157,7 +166,7 @@ func (s *Store) scanConnection(row rowScanner) (ConnectionRecord, error) {
 		// the connection with an empty password so the user can re-enter it.
 		spec.Password = ""
 	}
-	if err := json.Unmarshal([]byte(tlsJSON), &spec.TLS); err != nil {
+	if err := decodeTLS(tlsJSON, s, &spec); err != nil {
 		return ConnectionRecord{}, fmt.Errorf("store: decode tls settings for %s: %w", spec.ID, err)
 	}
 	if err := json.Unmarshal([]byte(subsJSON), &spec.Subscriptions); err != nil {
@@ -183,4 +192,21 @@ func nullIfEmpty(s string) any {
 		return nil
 	}
 	return s
+}
+
+// decodeTLS reads the TLS column, which holds sealed JSON.
+//
+// A row written before the key was encrypted holds plain JSON instead, and is
+// read as such rather than failing: an upgrade must not make every existing
+// connection unreadable. It is re-sealed the next time the connection is
+// saved. The fallback is safe in the sense that matters — anyone who can put
+// plaintext in that column can already read the key that would decrypt it.
+func decodeTLS(column string, s *Store, spec *mqttc.ConnectionSpec) error {
+	if column == "" {
+		return nil
+	}
+	if plain, err := s.box.Open(column); err == nil {
+		return json.Unmarshal([]byte(plain), &spec.TLS)
+	}
+	return json.Unmarshal([]byte(column), &spec.TLS)
 }
