@@ -9,14 +9,18 @@
 # that did not come through the Supervisor, so it would be a door to a refusal
 # page, but a port nobody needs is a port nobody should open.
 name: mqttview
-version: "0.1.4"
+version: "0.1.5"
 slug: mqttview
 description: A realtime web UI for MQTT brokers, with Home Assistant discovery and a Beckhoff PLC panel
 url: https://github.com/dgprivate/mqttview
+# Home Assistant's names, which do not match Docker's: armv7 is linux/arm/v7
+# and armhf is linux/arm/v6. The published image carries all four, so no
+# architecture here promises something that cannot be installed.
 arch:
   - aarch64
   - amd64
   - armv7
+  - armhf
 # No `image:` on purpose, for now.
 #
 # With one, Home Assistant pulls a prebuilt add-on image per architecture and

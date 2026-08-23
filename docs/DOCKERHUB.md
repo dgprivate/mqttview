@@ -38,7 +38,8 @@ which ships the hardened runtime settings the image expects.
 | `sha-<short>` | One specific commit, for pinning |
 | `x.y.z` | A release tag |
 
-`linux/amd64` and `linux/arm64`.
+`linux/amd64`, `linux/arm64`, `linux/arm/v7` and `linux/arm/v6` — so a
+Raspberry Pi runs it, including an old one on a 32-bit system.
 
 ## What is in the image
 

@@ -33,7 +33,10 @@ ARG BUILD_DATE=unknown
 # --------------------------------------------------------------------------
 # Frontend: built first, so a change to Go code does not invalidate npm
 # --------------------------------------------------------------------------
-FROM ${NODE_IMAGE} AS web
+# --platform=$BUILDPLATFORM: the frontend is the same bytes whatever the target
+# architecture, so it is built once, natively, rather than once per platform
+# under QEMU. Emulated npm is minutes each time and produces identical output.
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS web
 
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
@@ -45,9 +48,16 @@ RUN npm run build
 # --------------------------------------------------------------------------
 # Backend: a static binary with the frontend embedded
 # --------------------------------------------------------------------------
-FROM ${GO_IMAGE} AS build
+# Also native: Go cross-compiles, and with CGO off there is nothing that needs
+# the target's libc. Building emulated would be slower by an order of magnitude
+# for exactly the same binary.
+FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS build
 
 ARG VERSION
+# Supplied by buildx for each platform being built.
+ARG TARGETOS
+ARG TARGETARCH
+ARG TARGETVARIANT
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -58,7 +68,13 @@ COPY --from=web /src/web/dist ./web/dist
 # CGO stays off: the SQLite driver is pure Go, so the result needs no libc at
 # runtime. -trimpath keeps build paths out of the binary, and the buildid is
 # cleared so the same source produces the same bytes.
-RUN CGO_ENABLED=0 GOFLAGS=-buildvcs=false go build -trimpath \
+# GOARM comes from the variant: linux/arm/v7 is GOARM=7 and v6 is GOARM=6,
+# which is what an original Pi and a Pi Zero need. Go will not infer it from
+# GOARCH=arm alone, and a v7 binary on a v6 board fails with an illegal
+# instruction rather than anything that reads like a mistake.
+RUN CGO_ENABLED=0 GOFLAGS=-buildvcs=false \
+    GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOARM=${TARGETVARIANT#v} \
+    go build -trimpath \
     -ldflags "-s -w -buildid= -X main.version=${VERSION}" \
     -o /mqttview ./cmd/mqttview
 

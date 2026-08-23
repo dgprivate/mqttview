@@ -17,7 +17,8 @@ proper authentication, and a plugin system that can turn raw topics into
 something you actually recognise.
 
 Published as [`hausbit/mqttview`](https://hub.docker.com/r/hausbit/mqttview) for
-`linux/amd64` and `linux/arm64`, signed, with an SBOM inside the image. There is
+`linux/amd64`, `linux/arm64`, `linux/arm/v7` and `linux/arm/v6` — so an old
+Raspberry Pi runs it too — signed, with an SBOM inside the image. There is
 a [Home Assistant add-on](docs/HOME_ASSISTANT.md) too, and it needs no login.
 
 mqttview is a single Go binary with the frontend embedded. Point it at a

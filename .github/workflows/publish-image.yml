@@ -77,7 +77,15 @@ jobs:
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          # arm/v7 for a Raspberry Pi on a 32-bit OS and a Pi Zero 2; arm/v6
+          # for an original Pi and a Pi Zero. The add-on's manifest promises
+          # armv7, so the image has to have it or that install fails at build
+          # time with a Docker error.
+          #
+          # This costs little now that the frontend and the Go binary are built
+          # once, natively, and cross-compiled: only the small runtime stage is
+          # emulated per platform.
+          platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/arm/v6
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
