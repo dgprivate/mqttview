@@ -561,8 +561,16 @@ func connect(t *testing.T, spec mqttc.ConnectionSpec) *session {
 	if err := mgr.Connect(ctx, conn.Spec().ID); err != nil {
 		t.Fatalf("connect to %s: %v", spec.URL, err)
 	}
-	if got := conn.Status().State; got != mqttc.StateConnected {
-		t.Fatalf("connected, but the state is %q", got)
+	// Waited for rather than read. Connect returns when the session is up and
+	// the status is published from the client's own callback, so the two are
+	// ordered but not simultaneous — reading it here caught "connecting"
+	// occasionally, which is a race in the assertion and not in the client.
+	deadline := time.Now().Add(15 * time.Second)
+	for conn.Status().State != mqttc.StateConnected {
+		if time.Now().After(deadline) {
+			t.Fatalf("connected to %s, but the state stayed %q", spec.URL, conn.Status().State)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	s.conn = conn
 	return s
@@ -665,4 +673,20 @@ func (b *lockedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
+}
+
+// waitFor retries a condition until it holds or the time runs out. Used where
+// the thing being waited on is a message that may be published again in the
+// meantime, which a plain sleep-and-check cannot express.
+func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if cond() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+	}
 }

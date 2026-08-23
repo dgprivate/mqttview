@@ -279,11 +279,23 @@ func TestAConnectionComesBackByItselfAfterTheNetworkDrops(t *testing.T) {
 		}, 60*time.Second)
 
 		// And the subscription has to have come back with it: a reconnect that
-		// leaves the client deaf is worse than staying down, because it looks fine.
-		s.publish(t, mqttc.PublishRequest{Topic: topic, Payload: []byte("back"), QoS: 1})
-		if got := string(s.await(t, topic, 20*time.Second).Payload); got != "back" {
-			t.Errorf("payload after the reconnect = %q", got)
-		}
+		// leaves the client deaf is worse than staying down, because it looks
+		// fine.
+		//
+		// Published until it arrives rather than once. The connection is up
+		// before the re-subscribe has been acknowledged, so a single publish
+		// can legitimately go out into a broker that is not yet routing this
+		// filter — the property is that the subscription comes back, not that
+		// it comes back before the next packet.
+		waitFor(t, 30*time.Second, "a message to arrive after the reconnect", func() bool {
+			s.publish(t, mqttc.PublishRequest{Topic: topic, Payload: []byte("back"), QoS: 1})
+			select {
+			case m := <-s.messages:
+				return m.Topic == topic
+			case <-time.After(500 * time.Millisecond):
+				return false
+			}
+		})
 	})
 }
 
