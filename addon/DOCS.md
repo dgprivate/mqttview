@@ -103,37 +103,22 @@ Broker credentials are encrypted with a key generated on first start and kept
 beside the database. A backup contains both, which is what makes a restore
 work — treat the backup accordingly.
 
-### `mqtt_url`, `mqtt_username`, `mqtt_password`
+### Adding a broker
 
-A broker to add on first start.
+In mqttview, not here. Open the panel, **Connections → Add**, and fill in the
+form: URL, credentials, TLS with a CA and a client certificate if the broker
+wants one, and a connection test before you save. Credentials and private keys
+are encrypted with a key kept beside the database.
 
-```yaml
-mqtt_url: mqtt://mqtt.example.com:1883
-mqtt_username: someone
-mqtt_password: a-password
-```
+There used to be `mqtt_url` and a handful of `mqtt_*` options in this file.
+They are gone. They were a second, smaller version of a form that already
+exists, validated by nothing, and the one thing they reliably did was make the
+app harder to start.
 
-`mqtts://` for TLS. The connection is named after the host and subscribes to
-`#`, and you can change all of it in mqttview afterwards — this only ever adds
-a connection that is not there, and never touches one you have edited.
-
-For a broker that wants a **client certificate**, put the files in this app's
-configuration folder and name them:
-
-```yaml
-mqtt_url: mqtts://mqtt.example.com:8883
-mqtt_username: someone
-mqtt_password: a-password
-mqtt_ca_file: /config/ca.crt
-mqtt_client_cert_file: /config/client.crt
-mqtt_client_key_file: /config/client.key
-mqtt_server_name: mqtt.example.com     # if the certificate names something else
-```
-
-mqttview reads them once at start and stores the contents encrypted, so the
-paths only have to be right the first time. A file it cannot read stops the
-start with the name of the setting, rather than creating a connection that
-would fail at the handshake — or, worse, one that connects unverified.
+A broker Home Assistant already provides — the Mosquitto app, usually — is
+added on first start without being asked. That only ever adds a connection that
+is not there; one you have edited is left alone. What happened, or did not, is
+in the app log.
 
 ### Can it not just read the MQTT integration's settings?
 
@@ -142,36 +127,17 @@ provides, and Home Assistant's API strips credentials out of a config entry
 before returning it.
 
 They are readable on disk, in `.storage`, by an app that maps the Home
-Assistant configuration folder — but that mapping is not "read the MQTT
+Assistant configuration folder. That is what the companion app **mqttview
+(Home Assistant config access)** does — but the mapping is not "read the MQTT
 settings", it is read access to `secrets.yaml` and every other integration's
-credentials, in exchange for saving one form. `.storage` is also an internal
-format with no compatibility promise. mqttview does not ask for it.
+credentials, in exchange for saving one form. Take the plain app unless you
+want that trade.
 
-### `import_mqtt`
+## The Mosquitto app
 
-On by default. Asks Home Assistant for the broker it already uses, when
-`mqtt_url` is not set.
-
-This works when the broker is **provided by an app** — the Mosquitto app,
-usually — because that is the only kind the Supervisor knows about. The
-Supervisor's service registry is filled in by apps that offer a broker; the
-MQTT integration reads from it rather than writing to it. So a broker you
-entered into the MQTT integration yourself, or one running elsewhere on your
-network, cannot be discovered from here by any means. Use `mqtt_url` for those.
-
-Whatever happens is in the app log, including the reason it did nothing.
-
-## The MQTT broker
-
-The add-on asks Home Assistant for the MQTT service, so if you run the
-Mosquitto add-on the broker's address is already known to it. You still add the
-connection in mqttview yourself: mqttview is a tool for looking at brokers
-generally, and pre-filling one would be a guess about which one you meant.
-
-For the Mosquitto add-on, that is usually:
-
-- URL: `mqtt://core-mosquitto:1883`
-- Username and password: a Home Assistant user you created for it
+If you run it, its broker is added for you on first start. Its credentials are
+whatever Home Assistant user you created for it; the address is usually
+`mqtt://core-mosquitto:1883`.
 
 ## Ports
 

@@ -9,7 +9,7 @@
 # that did not come through the Supervisor, so it would be a door to a refusal
 # page, but a port nobody needs is a port nobody should open.
 name: mqttview (Home Assistant config access)
-version: "0.2.1"
+version: "0.2.2"
 slug: mqttview_hassconfig
 description: mqttview, plus read access to Home Assistant's configuration so it can pick up the broker from the MQTT integration
 url: https://github.com/dgprivate/mqttview
@@ -74,16 +74,11 @@ map:
   - homeassistant_config:ro
   - ssl:ro
 
+# Deliberately short. Brokers are added in mqttview itself, which has a form
+# for it with TLS, client certificates and a connection test; repeating half of
+# that here would be a second place to get it wrong, validated by nothing. A
+# broker Home Assistant already knows about is imported without being asked.
 options:
-  import_mqtt: true
-  mqtt_url: ""
-  mqtt_username: ""
-  mqtt_password: ""
-  mqtt_ca_file: ""
-  mqtt_client_cert_file: ""
-  mqtt_client_key_file: ""
-  mqtt_server_name: ""
-  mqtt_insecure: false
   log_level: info
   default_role: operator
   admin_users: []
@@ -91,29 +86,6 @@ options:
   frame_ancestors: []
 
 schema:
-  # Create a broker connection on first start if there is not one already.
-  # Only ever adds: a connection you have edited is left alone.
-  import_mqtt: bool?
-  # A broker to add, for the common case that Home Assistant cannot tell an app
-  # about yours. The Supervisor only knows about brokers an app provides — the
-  # Mosquitto app, usually. One you entered into the MQTT integration, or one
-  # running elsewhere on your network, is not something it can share, so name it
-  # here instead: mqtt://host:1883, or mqtts:// for TLS.
-  mqtt_url: str?
-  mqtt_username: str?
-  mqtt_password: password?
-  # Mutual TLS. Put the files in this app's configuration folder — the Files
-  # editor, Samba or SSH all reach it — and name them here as /config/ca.crt
-  # and so on. Paths rather than pasted PEM because an app's configuration is a
-  # form, and a certificate is a file.
-  mqtt_ca_file: str?
-  mqtt_client_cert_file: str?
-  mqtt_client_key_file: str?
-  # For a broker whose certificate names something other than the address you
-  # reach it at.
-  mqtt_server_name: str?
-  # Accepts any certificate. A real hole, and named so it reads like one.
-  mqtt_insecure: bool?
   log_level: list(debug|info|warn|error)
   # What a Home Assistant user may do in mqttview on first sight. Home
   # Assistant does not tell an add-on whether somebody is one of its

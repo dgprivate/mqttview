@@ -246,10 +246,11 @@ func TestAnImportedBrokerAppearsOnceAndStaysThatWayAcrossRestarts(t *testing.T) 
 	// Seeding runs on every start. Adding the same broker again on each one, or
 	// overwriting an edit somebody made in the panel, are both worse than not
 	// importing at all.
-	run := runApp(t, plainApp, withOptions(map[string]any{
-		"mqtt_url":      "mqtt://core-mosquitto:1883",
-		"mqtt_username": "addons",
-	}))
+	// Seeded the only way there is now: from the broker Home Assistant itself
+	// provides, which is what the Supervisor tells the app about.
+	run := runApp(t, plainApp, withBashio(bashioStub(true, map[string]string{
+		"host": "core-mosquitto", "port": "1883", "username": "addons", "ssl": "false",
+	})))
 
 	count := func() int {
 		inst := start(t, run.configPath, run.dataDir, "MQTTVIEW_INGRESS_TRUSTED_PROXIES=127.0.0.1")

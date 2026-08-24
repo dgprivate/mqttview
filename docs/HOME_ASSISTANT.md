@@ -141,11 +141,17 @@ If your broker is the **Mosquitto app**, the app asks the Supervisor for it and
 creates the connection on first start — nobody copies a host, a port and a
 password into a second form.
 
-If it is not, set `mqtt_url` in the app's configuration and it is added the same
-way. That is not a shortcoming to work around: the Supervisor's service registry
-is written by apps that *provide* a broker, and the MQTT integration reads from
-it. A broker entered into the integration, or running elsewhere on the network,
-is invisible to an app by any route through the Supervisor.
+If it is not, add it in mqttview — Connections → Add, which is a form built for
+exactly this, with TLS, client certificates and a connection test. The app's
+configuration deliberately offers no way to type a broker into it: that was a
+second, smaller version of the same form, validated by nothing, and it is what
+made the app fail to start when the Supervisor answered an import request with
+an error.
+
+The Supervisor's service registry is written by apps that *provide* a broker,
+and the MQTT integration reads from it rather than writing to it. A broker
+entered into the integration, or running elsewhere on the network, is therefore
+invisible to an app by any route through the Supervisor.
 
 Which is where the second app comes in. `mqttview_hassconfig` may read the
 configuration directory, so when the Supervisor has nothing to share it reads
@@ -158,8 +164,8 @@ option.
 
 It only ever adds. A connection you have since edited is left exactly as it is,
 because a configuration that reasserts itself on every restart is a setting
-that will not stay set. Turn it off with `import_mqtt: false` if you would
-rather add brokers yourself.
+that will not stay set — which is also why it needs no switch: an import that
+never overwrites anything is not something to turn off.
 
 The same mechanism is available outside Home Assistant: `connections:` in
 `mqttview.yaml` declares brokers to create if they are not there yet.

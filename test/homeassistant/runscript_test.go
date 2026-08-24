@@ -62,7 +62,10 @@ func bashioStub(available bool, values map[string]string) string {
 	if available {
 		b.WriteString("return 0; }\n")
 	} else {
-		b.WriteString("return 1; }\n")
+		// What the real one does when the Supervisor API says no: an error
+		// line, in colour, on stdout. Stdout used to be the configuration
+		// file, so this line went into it and the binary refused to start.
+		b.WriteString("printf '[10:37:10] ERROR: \\033[35mSomething went wrong contacting the API\\033[0m\\n'; return 1; }\n")
 	}
 	b.WriteString("bashio::services() {\n  case \"$2\" in\n")
 	for k, v := range values {
@@ -102,51 +105,6 @@ func TestAnAppWithNoOptionsStartsInHomeAssistantModeWithNoBroker(t *testing.T) {
 				t.Errorf("check-config said:\n%s", out)
 			}
 		})
-	}
-}
-
-func TestAConfiguredBrokerReachesTheBinaryIntact(t *testing.T) {
-	for _, app := range []string{plainApp, hassConfigApp} {
-		t.Run(app, func(t *testing.T) {
-			run := runApp(t, app, withOptions(map[string]any{
-				"mqtt_url":      "mqtts://broker.example:8883",
-				"mqtt_username": "dean",
-				"mqtt_password": "p a s s", // spaces, because YAML
-				"mqtt_insecure": true,
-			}))
-
-			out, err := checkConfig(t, run)
-			if err != nil {
-				t.Fatalf("check-config: %v\n%s", err, out)
-			}
-			// -check-config prints what the binary resolved, so this asserts
-			// the value survived the shell, the YAML and the loader rather
-			// than that the script printed a line.
-			if !strings.Contains(out, "mqtts://broker.example:8883") || !strings.Contains(out, "as dean") {
-				t.Errorf("the broker did not arrive:\n%s", out)
-			}
-			if !strings.Contains(run.config, "insecure_skip_verify: true") {
-				t.Errorf("mqtt_insecure was dropped:\n%s", run.config)
-			}
-			if !strings.Contains(run.log, "warning") {
-				t.Errorf("accepting any certificate was not warned about:\n%s", run.log)
-			}
-		})
-	}
-}
-
-func TestTurningTheImportOffImportsNothing(t *testing.T) {
-	run := runApp(t, hassConfigApp,
-		withOptions(map[string]any{"import_mqtt": false}),
-		withHassConfig(hassStorage(t, map[string]any{"broker": "mqtt.example", "port": 1883})),
-		withBashio(bashioStub(true, map[string]string{"host": "core-mosquitto", "port": "1883"})),
-	)
-
-	if strings.Contains(run.config, "connections:") {
-		t.Errorf("import_mqtt: false still added a broker:\n%s", run.config)
-	}
-	if !strings.Contains(run.log, "import_mqtt is off") {
-		t.Errorf("nothing in the log says why:\n%s", run.log)
 	}
 }
 
@@ -231,26 +189,10 @@ func TestTheMQTTIntegrationIsUnreachableFromThePlainApp(t *testing.T) {
 		t.Errorf("the log does not say why nothing was imported:\n%s", run.log)
 	}
 	// And it says what to do instead, because "nothing happened" is not an
-	// answer somebody can act on.
-	if !strings.Contains(run.log, "mqtt_url") {
+	// answer somebody can act on. The answer is the panel's own form, since
+	// that is the only place a broker is entered now.
+	if !strings.Contains(run.log, "Connections -> Add") {
 		t.Errorf("the log offers no way forward:\n%s", run.log)
-	}
-}
-
-func TestAnExplicitBrokerBeatsTheIntegration(t *testing.T) {
-	storage := hassStorage(t, map[string]any{"broker": "from-storage", "port": 1883})
-
-	run := runApp(t, hassConfigApp,
-		withOptions(map[string]any{"mqtt_url": "mqtt://typed-in:1883"}),
-		withHassConfig(storage),
-		withBashio(bashioStub(true, map[string]string{"host": "core-mosquitto", "port": "1883"})),
-	)
-
-	if strings.Contains(run.config, "from-storage") || strings.Contains(run.config, "core-mosquitto") {
-		t.Errorf("something overrode what somebody typed:\n%s", run.config)
-	}
-	if strings.Count(run.config, "- name:") != 1 {
-		t.Errorf("more than one broker was added:\n%s", run.config)
 	}
 }
 
@@ -364,5 +306,51 @@ func TestTheAppLogsTheVersionOfTheBinaryItIsAboutToStart(t *testing.T) {
 	}
 	if strings.Contains(versionLine, "unknown") {
 		t.Errorf("the binary would not say what it is: %q", versionLine)
+	}
+}
+
+func TestALibrarysChatterNeverReachesTheConfigFile(t *testing.T) {
+	// bashio logs to stdout, and the script builds the configuration file on
+	// stdout. A Supervisor API call that went wrong therefore wrote
+	// "ERROR: <ansi>Something went wrong contacting the API<ansi>" into
+	// mqttview.yaml, and the binary refused to start it: "control characters
+	// are not allowed". The app would not start at all, which is a great deal
+	// worse than not importing a broker.
+	for _, app := range []string{plainApp, hassConfigApp} {
+		t.Run(app, func(t *testing.T) {
+			run := runApp(t, app, withBashio(bashioStub(false, nil)))
+
+			if strings.ContainsAny(run.config, "\x1b\x00\a") {
+				t.Errorf("a control character reached the config file:\n%q", run.config)
+			}
+			for _, noise := range []string{"ERROR", "contacting the API", "["} {
+				if strings.Contains(run.config, noise) {
+					t.Errorf("%q from the library reached the config file:\n%s", noise, run.config)
+				}
+			}
+			// The real check: the binary accepts what the app wrote.
+			out, err := checkConfig(t, run)
+			if err != nil {
+				t.Fatalf("the binary rejected the config the app wrote: %v\n%s", err, out)
+			}
+			// And the message is still in the log, where it belongs.
+			if !strings.Contains(run.log, "no MQTT service to share") {
+				t.Errorf("the log does not say what happened:\n%s", run.log)
+			}
+		})
+	}
+}
+
+func TestThereIsNoWayToTypeABrokerIntoTheAppConfiguration(t *testing.T) {
+	// Brokers are added in mqttview, which has a form for it. A second,
+	// smaller form in the app's options would be a worse copy that nothing
+	// validates — and it is what made the app refuse to start.
+	for _, app := range apps(t) {
+		m := manifest(t, app)
+		for key := range m.Schema {
+			if strings.HasPrefix(key, "mqtt_") || key == "import_mqtt" {
+				t.Errorf("%s still offers %q", app, key)
+			}
+		}
 	}
 }

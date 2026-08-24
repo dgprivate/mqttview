@@ -10,6 +10,23 @@ set -euo pipefail
 readonly OPTIONS=/data/options.json
 readonly CONFIG=/data/mqttview.yaml
 
+# The connections block is built here rather than written straight to the
+# configuration file.
+#
+# bashio logs to stdout. Stdout, inside the block that generates the file, is
+# the file — so a Supervisor API call that goes wrong put
+# "ERROR: <ansi>Something went wrong contacting the API<ansi>" into
+# mqttview.yaml, and the binary refused to start: "control characters are not
+# allowed". An app that will not start because it tried to be helpful about a
+# broker is worse than one that never offers.
+#
+# So nothing a library prints can reach the file: what goes in it is what this
+# script explicitly writes here, and everything else is a log line.
+CONNECTIONS="$(mktemp)"
+trap 'rm -f "${CONNECTIONS}"' EXIT
+
+out() { printf '%s\n' "$*" >> "${CONNECTIONS}"; }
+
 option() {
     # A missing key reads as empty rather than "null", which is what would end
     # up in the config file otherwise.
@@ -29,33 +46,16 @@ option_list() {
         '.[$key] // [] | .[] | $pad + "- " + (. | tostring)' "${OPTIONS}"
 }
 
-# Home Assistant already knows about a broker if the MQTT integration is set
-# up, and asking the Supervisor for it beats making somebody copy the host,
-# port and password into a second form. `services: mqtt:want` in config.yaml is
-# what grants this; "want" rather than "need" so the app still starts without
-# one.
 # say prints to stderr, which is where the add-on log comes from. The config
 # file is stdout here, so anything informational has to go the other way.
 say() { echo "mqttview: $*" >&2; }
 
+# mqtt_connection adds the broker Home Assistant already knows about, if it can
+# find one. There is deliberately no option to type one in here: mqttview has a
+# form for adding brokers, with TLS, client certificates and the rest, and a
+# second half-form in the app's configuration would only be a worse copy of it
+# that nothing validates.
 mqtt_connection() {
-    # An explicitly configured broker wins: somebody who typed it in means it,
-    # and the Supervisor cannot tell an app about a broker that no app
-    # provides — one entered into the MQTT integration, or running elsewhere on
-    # the network, is invisible from here no matter what is asked.
-    local url user pass
-    url="$(option mqtt_url)"
-    if [ -n "${url}" ]; then
-        user="$(option mqtt_username)"
-        pass="$(option mqtt_password)"
-        say "adding the broker from this app's configuration: ${url}"
-        # Named after the host rather than "Home Assistant": this one is not
-        # Home Assistant's, and a list of brokers wants to say which is which.
-        emit_connection "${url}" "${user}" "${pass}" "$(broker_name "${url}")"
-        emit_tls
-        return 0
-    fi
-
     # bashio first: it is the Supervisor's own client, it knows where the token
     # lives and what the service API looks like, and it will keep knowing after
     # the next rename. Home Assistant renamed HASSIO_TOKEN to SUPERVISOR_TOKEN
@@ -112,8 +112,8 @@ mqtt_from_storage() {
     [ -r "${entries}" ] || entries=/config/.storage/core.config_entries
     if [ ! -r "${entries}" ]; then
         say "this app has no access to Home Assistant's configuration, so there"
-        say "is nothing further to try. Set mqtt_url here, or add the broker in"
-        say "mqttview once — either way it is stored and stays."
+        say "is nothing further to try. Add the broker in mqttview itself:"
+        say "Connections -> Add. It is stored and stays."
         return 0
     fi
 
@@ -152,40 +152,10 @@ mqtt_from_storage() {
     emit_connection "${scheme}://${host}:${port}" "${user}" "${pass}" "$(broker_name "${host}")"
 
     # "auto" means Home Assistant's own bundle rather than a file on disk.
-    [ -n "${ca}" ] && [ "${ca}" != "auto" ] && echo "    ca_file: ${ca}"
-    [ -n "${cert}" ] && echo "    client_cert_file: ${cert}"
-    [ -n "${key}" ] && echo "    client_key_file: ${key}"
-    [ "${insecure}" = "true" ] && echo "    insecure_skip_verify: true"
-    return 0
-}
-
-# emit_tls adds the TLS block, for a broker that wants a client certificate.
-#
-# The files are named rather than copied: mqttview reads them at startup and
-# stores the contents encrypted, so the paths only have to be right once.
-emit_tls() {
-    local ca cert key server insecure
-    ca="$(option mqtt_ca_file)"
-    cert="$(option mqtt_client_cert_file)"
-    key="$(option mqtt_client_key_file)"
-    server="$(option mqtt_server_name)"
-    insecure="$(option mqtt_insecure)"
-
-    [ -n "${ca}${cert}${key}${server}" ] || [ "${insecure}" = "true" ] || return 0
-
-    for f in "${ca}" "${cert}" "${key}"; do
-        [ -z "${f}" ] && continue
-        [ -r "${f}" ] || say "warning: ${f} cannot be read; mqttview will say so and stop"
-    done
-
-    [ -n "${ca}" ] && echo "    ca_file: ${ca}"
-    [ -n "${cert}" ] && echo "    client_cert_file: ${cert}"
-    [ -n "${key}" ] && echo "    client_key_file: ${key}"
-    [ -n "${server}" ] && echo "    server_name: ${server}"
-    [ "${insecure}" = "true" ] && {
-        say "warning: mqtt_insecure accepts any certificate for ${url:-the broker}"
-        echo "    insecure_skip_verify: true"
-    }
+    [ -n "${ca}" ] && [ "${ca}" != "auto" ] && out "    ca_file: ${ca}"
+    [ -n "${cert}" ] && out "    client_cert_file: ${cert}"
+    [ -n "${key}" ] && out "    client_key_file: ${key}"
+    [ "${insecure}" = "true" ] && out "    insecure_skip_verify: true"
     return 0
 }
 
@@ -199,14 +169,14 @@ broker_name() {
 # a second connection beside the first.
 emit_connection() {
     local url="$1" user="$2" pass="$3" name="${4:-Home Assistant}"
-    echo ""
-    echo "connections:"
-    echo "  - name: ${name}"
-    echo "    url: ${url}"
-    [ -n "${user}" ] && [ "${user}" != "null" ] && echo "    username: ${user}"
-    [ -n "${pass}" ] && [ "${pass}" != "null" ] && echo "    password: ${pass}"
-    echo "    subscribe:"
-    echo "      - \"#\""
+    out ""
+    out "connections:"
+    out "  - name: ${name}"
+    out "    url: ${url}"
+    [ -n "${user}" ] && [ "${user}" != "null" ] && out "    username: ${user}"
+    [ -n "${pass}" ] && [ "${pass}" != "null" ] && out "    password: ${pass}"
+    out "    subscribe:"
+    out "      - \"#\""
 }
 
 log_level="$(option log_level)"
@@ -253,11 +223,10 @@ fallback_user="$(option fallback_user)"
         echo "${ancestors}"
     fi
 
-    if [ "$(option import_mqtt)" = "false" ]; then
-        say "import_mqtt is off, so not asking the Supervisor about MQTT"
-    else
-        mqtt_connection
-    fi
+    # Stdout to the log, not to the file: see CONNECTIONS above.
+    mqtt_connection >&2
+
+    cat "${CONNECTIONS}"
 } > "${CONFIG}"
 
 say "starting in Home Assistant mode (log level ${log_level})"
