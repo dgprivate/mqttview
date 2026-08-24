@@ -84,3 +84,14 @@ WebSocket itself and never emits an empty frame. The bytes that make up the
 packet are identical either way, so nothing is hidden by this; it is cheaper
 than asking everybody running 2.1 to change transport. `test/mosquitto` runs
 its matrix against 2.1 so a regression is visible.
+
+**Fixed upstream too:**
+[eclipse-mosquitto/mosquitto#3724](https://github.com/eclipse-mosquitto/mosquitto/pull/3724),
+closing their issue #3704, which describes the same defect. `net__read_ws()`
+returned a positive byte count for a frame it wrote nothing for — the value
+left in `len` by the last header field read — so the MQTT parser consumed that
+many stale buffer bytes. It reports `EAGAIN` instead, which is what the same
+function already does for PING and CLOSE.
+
+The workaround here stays regardless: it is what keeps mqttview working against
+the 2.1 releases already installed.
