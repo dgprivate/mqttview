@@ -1,7 +1,9 @@
 package hass
 
 import (
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -294,5 +296,76 @@ func TestSettingBoolReadsWhatTheUISends(t *testing.T) {
 		if got := settingBool(map[string]any{"k": tc.value}, "k", true); got != tc.want {
 			t.Errorf("settingBool(%v) = %v, want %v", tc.value, got, tc.want)
 		}
+	}
+}
+
+func TestReadingTheRegistryWhileItUpdatesIsSafe(t *testing.T) {
+	// The panel polls /devices while messages arrive, so the registry is read
+	// and written at the same time by definition. It used to hand out pointers
+	// to its live entities, and the race detector caught an HTTP handler
+	// serialising one while a state message rewrote it — from the plugin's
+	// end-to-end test, once in a hundred runs, on a loaded machine.
+	//
+	// Run this with -race; without it the test proves nothing.
+	reg := NewRegistry()
+	upsert(t, reg, "sensor", "s1", entityConfig{
+		"name":                  "T",
+		"state_topic":           "home/state",
+		"json_attributes_topic": "home/attrs",
+		"availability_topic":    "home/available",
+	})
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			reg.ApplyState("c1", "home/state", []byte(strconv.Itoa(i)))
+			reg.ApplyState("c1", "home/attrs", []byte(`{"battery":42}`))
+			reg.ApplyState("c1", "home/available", []byte("online"))
+		}
+	}()
+
+	// What the handlers do: take what the registry gives them and read every
+	// field of it, which is what marshalling to JSON amounts to.
+	for range 200 {
+		for _, d := range reg.Devices("") {
+			for _, e := range d.Entities {
+				readEverything(e)
+			}
+		}
+		for _, e := range reg.Entities("") {
+			readEverything(e)
+		}
+		if e, ok := reg.Entity("c1|homeassistant/sensor/s1/config"); ok {
+			readEverything(e)
+		}
+	}
+
+	close(stop)
+	wg.Wait()
+}
+
+// readEverything touches the fields a JSON encoder would, so the race detector
+// sees the same reads a real request makes.
+func readEverything(e *Entity) {
+	if e == nil {
+		return
+	}
+	_ = e.Name + e.ConnectionID + string(e.Availability)
+	_ = e.UpdatedAt
+	if e.State != nil {
+		_ = e.State.Raw + toString(e.State.Value)
+	}
+	for k, v := range e.Attributes {
+		_ = k
+		_ = v
 	}
 }

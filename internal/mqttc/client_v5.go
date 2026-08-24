@@ -84,13 +84,7 @@ func newV5Client(spec ConnectionSpec, tlsCfg *tls.Config, events Events) (*v5Cli
 		OnConnectionUp: func(cm *autopaho.ConnectionManager, connack *paho.Connack) {
 			// Subscriptions must be re-sent unless the broker restored the
 			// session; re-sending is harmless when it did.
-			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer cancel()
-				if err := c.subscribeVia(ctx, cm, c.snapshotSubs()); err != nil {
-					c.events.fail(err)
-				}
-			}()
+			go c.resubscribe(cm)
 			c.setConnErr(nil)
 			c.events.up(connack.SessionPresent)
 		},
@@ -269,6 +263,48 @@ func (c *v5Client) Disconnect(ctx context.Context) error {
 		return errors.Join(err, fmt.Errorf("mqttc: waiting for the connection to close: %w", ctx.Err()))
 	}
 	return err
+}
+
+// resubscribe re-sends the subscriptions after a connection comes up, and
+// keeps trying if it does not get through.
+//
+// One attempt was not enough. A SUBSCRIBE that times out on a busy broker
+// leaves a client that is connected, reports no error the user would act on,
+// and receives nothing for the rest of its life — worse than a connection that
+// is visibly down. Seen for real: reconnected, "Sent: 30, Received: 0".
+func (c *v5Client) resubscribe(cm *autopaho.ConnectionManager) {
+	backoff := time.Second
+	for attempt := 1; attempt <= 5; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		err := c.subscribeVia(ctx, cm, c.snapshotSubs())
+		cancel()
+		if err == nil {
+			return
+		}
+		c.events.fail(fmt.Errorf("subscribe after connecting (attempt %d): %w", attempt, err))
+
+		select {
+		case <-c.done():
+			return // disconnected in the meantime; nobody is waiting for this
+		case <-time.After(backoff):
+		}
+		if backoff < 30*time.Second {
+			backoff *= 2
+		}
+	}
+}
+
+// done reports the client having been disconnected, so a retry loop started by
+// a callback does not outlive it.
+func (c *v5Client) done() <-chan struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cm == nil {
+		closed := make(chan struct{})
+		close(closed)
+		return closed
+	}
+	return c.cm.Done()
 }
 
 func (c *v5Client) snapshotSubs() []Subscription {

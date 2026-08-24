@@ -540,7 +540,7 @@ func (r *Registry) Entities(connID string) []*Entity {
 		if connID != "" && e.ConnectionID != connID {
 			continue
 		}
-		out = append(out, e)
+		out = append(out, e.snapshot())
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
@@ -551,7 +551,32 @@ func (r *Registry) Entity(id string) (*Entity, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	e, ok := r.entities[id]
-	return e, ok
+	return e.snapshot(), ok
+}
+
+// snapshot copies an entity so a caller can read it after the lock is gone.
+//
+// A shallow copy is enough, and that is a property of how the registry
+// updates: State and Attributes are replaced with new values rather than
+// modified in place, so a copy taken under the lock stays consistent. It is
+// not a style choice — handing out live pointers meant an HTTP handler
+// serialising an entity while a message updated it, which the race detector
+// caught in the plugin's end-to-end test and which a browser polling /devices
+// on a busy broker would hit for real.
+func (e *Entity) snapshot() *Entity {
+	if e == nil {
+		return nil
+	}
+	c := *e
+	return &c
+}
+
+func snapshotAll(in []*Entity) []*Entity {
+	out := make([]*Entity, 0, len(in))
+	for _, e := range in {
+		out = append(out, e.snapshot())
+	}
+	return out
 }
 
 // DeviceView is a device with its entities attached, which is how the UI
@@ -588,10 +613,11 @@ func (r *Registry) Devices(connID string) []DeviceView {
 			continue
 		}
 		sortEntities(entities)
-		out = append(out, DeviceView{Device: *d, Entities: entities})
+		out = append(out, DeviceView{Device: *d, Entities: snapshotAll(entities)})
 	}
 	if len(orphans) > 0 {
 		sortEntities(orphans)
+		orphans = snapshotAll(orphans)
 		out = append(out, DeviceView{
 			Device: Device{
 				Key:          "__ungrouped__",

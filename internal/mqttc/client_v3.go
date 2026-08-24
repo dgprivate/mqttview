@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -73,8 +74,14 @@ func newV3Client(spec ConnectionSpec, tlsCfg *tls.Config, events Events) (*v3Cli
 	opts.SetOnConnectHandler(func(cl paho3.Client) {
 		// paho 3 only restores subscriptions for persistent sessions, so we
 		// always replay our own set. Doing it here also covers reconnects.
+		//
+		// Retried, because one failed attempt leaves a client that is
+		// connected and deaf: no error anybody would act on, and nothing ever
+		// arrives. The retries run in their own goroutine — this handler is on
+		// paho's connection goroutine, and sleeping in it stalls the client.
 		if err := c.resubscribe(cl); err != nil {
 			c.events.fail(err)
+			go c.retryResubscribe(cl)
 		}
 		// MQTT 3 exposes session-present only on the initial connect token,
 		// which Connect reports; reconnects assume a fresh session.
@@ -160,6 +167,26 @@ func (c *v3Client) Disconnect(_ context.Context) error {
 	// 250ms lets in-flight packets drain without making the UI wait.
 	c.client.Disconnect(250)
 	return nil
+}
+
+// retryResubscribe keeps replaying the subscriptions until the broker takes
+// them or the client is no longer connected.
+func (c *v3Client) retryResubscribe(cl paho3.Client) {
+	backoff := time.Second
+	for attempt := 2; attempt <= 5; attempt++ {
+		time.Sleep(backoff)
+		if backoff < 30*time.Second {
+			backoff *= 2
+		}
+		if !cl.IsConnected() {
+			return // a new connection will run the handler again
+		}
+		if err := c.resubscribe(cl); err == nil {
+			return
+		} else {
+			c.events.fail(fmt.Errorf("subscribe after connecting (attempt %d): %w", attempt, err))
+		}
+	}
 }
 
 func (c *v3Client) resubscribe(cl paho3.Client) error {

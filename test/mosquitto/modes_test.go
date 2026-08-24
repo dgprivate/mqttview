@@ -161,8 +161,8 @@ func TestTLS(t *testing.T) {
 		})
 
 		t.Run("a name that is not in the certificate is refused", func(t *testing.T) {
-			// The server certificate carries 127.0.0.1 and localhost. Reaching the
-			// same broker by another name has to fail, otherwise hostname
+			// The certificate carries this broker's own address and localhost.
+			// Reaching it by another name has to fail, or hostname
 			// verification is not happening.
 			err := tryConnect(t, mqttc.ConnectionSpec{
 				ID: "sni", URL: b.url("mqtts"), Version: mqttc.V311,

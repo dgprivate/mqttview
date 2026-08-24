@@ -230,7 +230,7 @@ func TestALastWillIsPublishedWhenTheClientVanishes(t *testing.T) {
 			Subscriptions: []mqttc.Subscription{{Filter: willTopic, QoS: 1}},
 		})
 
-		cable := newLink(t, fmt.Sprintf("127.0.0.1:%d", b.port))
+		cable := newLink(t, b.addr())
 		doomed := connect(t, mqttc.ConnectionSpec{
 			ID: "doomed", URL: cable.url(), Version: mqttc.V311, CleanStart: true,
 			Will: &mqttc.Will{Topic: willTopic, Payload: "offline", QoS: 1},
@@ -245,9 +245,21 @@ func TestALastWillIsPublishedWhenTheClientVanishes(t *testing.T) {
 
 		cable.cut()
 
-		msg := watcher.await(t, willTopic, 30*time.Second)
-		if string(msg.Payload) != "offline" {
-			t.Errorf("the will payload was %q", msg.Payload)
+		// Waiting for the will's payload rather than for the next message on
+		// the topic. "online" was published retained, and a client that
+		// re-subscribes — which ours does on every connect — is sent it again,
+		// so the queue can still hold a copy when the cable is pulled.
+		deadline := time.After(30 * time.Second)
+		for {
+			var got mqttc.Message
+			select {
+			case got = <-watcher.messages:
+			case <-deadline:
+				t.Fatal("the will was never published")
+			}
+			if got.Topic == willTopic && string(got.Payload) == "offline" {
+				return
+			}
 		}
 	})
 }
@@ -258,7 +270,7 @@ func TestAConnectionComesBackByItselfAfterTheNetworkDrops(t *testing.T) {
 		// switch reboots. A panel that needs a human to press reconnect is a panel
 		// showing yesterday's values.
 		b := start(t, config{})
-		cable := newLink(t, fmt.Sprintf("127.0.0.1:%d", b.port))
+		cable := newLink(t, b.addr())
 		topic := "mqttview/reconnect/probe"
 
 		s := connect(t, mqttc.ConnectionSpec{

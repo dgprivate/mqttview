@@ -31,6 +31,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -202,11 +203,31 @@ func pullOnce(t *testing.T, image string) {
 
 // broker is one running Mosquitto, configured for one mode.
 type broker struct {
+	host    string
 	port    int
 	dir     string
 	log     *lockedBuffer
 	cmd     *exec.Cmd
 	version string // what it reported on startup
+}
+
+var brokerHosts atomic.Uint32
+
+// brokerHost hands out a loopback address of its own to each broker.
+//
+// A free port is not enough. `go test ./...` runs each package as its own
+// process, they all ask the kernel for a port the same way, and a port one of
+// them tested and released is one another can be given moments later. That
+// happened: a WebSocket test found its broker's listener missing, because the
+// port had gone to a server in another package, and the log said so — "Unable
+// to create websockets listener on port 38035" — after this harness had
+// already decided the broker was up.
+//
+// All of 127.0.0.0/8 is loopback on Linux, so every broker gets an address
+// nothing else in any process is using, and the port stops mattering.
+func brokerHost() string {
+	n := brokerHosts.Add(1)
+	return fmt.Sprintf("127.%d.%d.%d", 30+(n>>16)%100, (n>>8)&0xFF, n&0xFF)
 }
 
 // config describes what to write into mosquitto.conf. Every field maps to one
@@ -220,12 +241,14 @@ type config struct {
 	extra       []string
 }
 
-// certs is the small PKI these tests need: one CA, a server certificate for
-// 127.0.0.1 and a client certificate signed by the same CA.
+// certs is the small PKI these tests need: one CA, a client certificate signed
+// by it, and per-broker server certificates issued from it on demand.
 type certs struct {
+	// The CA is kept, not just its certificate: each broker gets a server
+	// certificate issued for the loopback address it is listening on.
+	ca            *x509.Certificate
+	caKey         *ecdsa.PrivateKey
 	caPEM         string
-	serverCert    string
-	serverKey     string
 	clientCertPEM string
 	clientKeyPEM  string
 	// otherCAPEM is a second, unrelated CA, used to check that verification
@@ -249,11 +272,6 @@ func testPKI(t *testing.T) certs {
 			pkiErr = err
 			return
 		}
-		serverCert, serverKey, err := issue(ca, caKey, "localhost", []string{"localhost"}, []net.IP{net.ParseIP("127.0.0.1")}, false)
-		if err != nil {
-			pkiErr = err
-			return
-		}
 		clientCert, clientKey, err := issue(ca, caKey, "mqttview", nil, nil, true)
 		if err != nil {
 			pkiErr = err
@@ -265,9 +283,9 @@ func testPKI(t *testing.T) certs {
 			return
 		}
 		pki = certs{
+			ca:            ca,
+			caKey:         caKey,
 			caPEM:         caPEM,
-			serverCert:    serverCert,
-			serverKey:     serverKey,
 			clientCertPEM: clientCert,
 			clientKeyPEM:  clientKey,
 			otherCAPEM:    otherCAPEM,
@@ -346,6 +364,7 @@ func startWith(t *testing.T, r runner, cfg config) *broker {
 	if err := os.Chmod(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	host := brokerHost()
 	port := freePort(t)
 
 	var conf strings.Builder
@@ -356,16 +375,23 @@ func startWith(t *testing.T, r runner, cfg config) *broker {
 	case cfg.unixSocket:
 		fmt.Fprintf(&conf, "listener 0 %s\n", filepath.Join(dir, "mqtt.sock"))
 	default:
-		fmt.Fprintf(&conf, "listener %d 127.0.0.1\n", port)
+		fmt.Fprintf(&conf, "listener %d %s\n", port, host)
 	}
 	if cfg.websockets {
 		conf.WriteString("protocol websockets\n")
 	}
 	if cfg.tls {
 		ca := testPKI(t)
+		// The server certificate is issued for this broker's own address, so
+		// verification is real rather than waved through.
+		serverCert, serverKey, err := issue(ca.ca, ca.caKey, "localhost",
+			[]string{"localhost"}, []net.IP{net.ParseIP(host)}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
 		write(t, filepath.Join(dir, "ca.crt"), ca.caPEM)
-		write(t, filepath.Join(dir, "server.crt"), ca.serverCert)
-		write(t, filepath.Join(dir, "server.key"), ca.serverKey)
+		write(t, filepath.Join(dir, "server.crt"), serverCert)
+		write(t, filepath.Join(dir, "server.key"), serverKey)
 		fmt.Fprintf(&conf, "cafile %s\n", filepath.Join(dir, "ca.crt"))
 		fmt.Fprintf(&conf, "certfile %s\n", filepath.Join(dir, "server.crt"))
 		fmt.Fprintf(&conf, "keyfile %s\n", filepath.Join(dir, "server.key"))
@@ -403,7 +429,7 @@ func startWith(t *testing.T, r runner, cfg config) *broker {
 		t.Fatal(err)
 	}
 
-	b := &broker{port: port, dir: dir, log: out, cmd: cmd, version: r.version}
+	b := &broker{host: host, port: port, dir: dir, log: out, cmd: cmd, version: r.version}
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
@@ -437,8 +463,12 @@ func (b *broker) checkItIsOurs(t *testing.T, cfg config) {
 		if strings.Contains(log, want) {
 			return
 		}
-		if strings.Contains(log, "Unable to bind") || strings.Contains(log, "Address already in use") {
-			t.Fatalf("port %d was taken by something else:\n%s", b.port, log)
+		// Any error line, not a list of known ones. Mosquitto reported "Unable
+		// to create websockets listener on port N" right after the line this
+		// waits for, and a check that knew about "Unable to bind" and nothing
+		// else declared the broker healthy anyway.
+		if i := strings.Index(log, "Error: "); i >= 0 {
+			t.Fatalf("the broker failed to start what it was asked to:\n%s", log[i:])
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("the broker never said it bound port %d:\n%s", b.port, log)
@@ -478,7 +508,7 @@ func (b *broker) waitUntilListening(t *testing.T, cfg config) {
 			if _, err := os.Stat(b.socketPath()); err == nil {
 				return
 			}
-		} else if conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", b.port), time.Second); err == nil {
+		} else if conn, err := net.DialTimeout("tcp", b.addr(), time.Second); err == nil {
 			conn.Close()
 			return
 		}
@@ -492,11 +522,13 @@ func (b *broker) waitUntilListening(t *testing.T, cfg config) {
 
 func (b *broker) socketPath() string { return filepath.Join(b.dir, "mqtt.sock") }
 
+func (b *broker) addr() string { return fmt.Sprintf("%s:%d", b.host, b.port) }
+
 func (b *broker) url(scheme string) string {
 	if scheme == "unix" {
 		return "unix://" + b.socketPath()
 	}
-	return fmt.Sprintf("%s://127.0.0.1:%d", scheme, b.port)
+	return fmt.Sprintf("%s://%s", scheme, b.addr())
 }
 
 // --------------------------------------------------------------------------

@@ -416,6 +416,13 @@ func (c *Conn) connect(ctx context.Context) error {
 		return explained
 	}
 
+	// Reported here as well as from the client's own callback. For MQTT 5,
+	// autopaho releases AwaitConnection before it runs OnConnectionUp, so a
+	// caller whose Connect returned nil could read "connecting" back out of
+	// the status — which is the sort of thing that makes a UI look broken and
+	// a test look flaky. Connect returning nil means connected.
+	c.setState(StateConnected, nil)
+
 	c.mu.RLock()
 	subs := make([]Subscription, 0, len(spec.Subscriptions)+len(c.ephemeral))
 	subs = append(subs, spec.Subscriptions...)
