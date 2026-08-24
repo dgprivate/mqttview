@@ -9,7 +9,7 @@
 # that did not come through the Supervisor, so it would be a door to a refusal
 # page, but a port nobody needs is a port nobody should open.
 name: mqttview (Home Assistant config access)
-version: "0.2.0"
+version: "0.2.1"
 slug: mqttview_hassconfig
 description: mqttview, plus read access to Home Assistant's configuration so it can pick up the broker from the MQTT integration
 url: https://github.com/dgprivate/mqttview

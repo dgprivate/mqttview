@@ -9,7 +9,7 @@
 # that did not come through the Supervisor, so it would be a door to a refusal
 # page, but a port nobody needs is a port nobody should open.
 name: mqttview
-version: "0.2.0"
+version: "0.2.1"
 slug: mqttview
 description: A realtime web UI for MQTT brokers, with Home Assistant discovery and a Beckhoff PLC panel
 url: https://github.com/dgprivate/mqttview
