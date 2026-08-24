@@ -1,0 +1,196 @@
+From b75cd864cdf3c02f567e74edcc296c4d87a4cc33 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Dean=20Gosti=C5=A1a?= <dean@black.si>
+Date: Mon, 24 Aug 2026 09:01:28 +0000
+Subject: [PATCH] state: take the send quota under the mutex in AddToSession
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+ConAckReceived replaces s.inflight for the new connection while holding the
+mutex. AddToSession read the same field after releasing it, so a publish in
+flight during a reconnect races the reconnect:
+
+  Write at 0x... by goroutine 288:
+    state.(*State).ConAckReceived()  state.go:206   s.inflight = newSendQuota(recvMax)
+    paho.(*Client).Connect()
+    autopaho.establishServerConnection()
+
+  Previous read at 0x... by goroutine 286:
+    state.(*State).AddToSession()    state.go:379   s.inflight.Acquire(ctx)
+    paho.(*Client).publishQoS12()
+    autopaho.(*ConnectionManager).Publish()
+
+The read cannot simply be moved under the mutex: Acquire blocks by design, and
+holding the mutex across it would stall every other operation on the state.
+The quota belongs to one connection, though, and AddToSession already takes a
+reference to that connection's context under the mutex - so it takes the quota
+alongside it, and uses that reference for the acquire and both release paths.
+
+Behaviour is unchanged. A quota acquired from the previous connection is
+released back to the previous connection, which is what happened whenever the
+old code did not read a stale pointer, and matches "the send quota and Receive
+Maximum value are not preserved across Network Connections" (MQTT 5, 4.9): the
+new connection starts with a fresh quota either way.
+
+The test reproduces it by reconnecting in one goroutine while publishing in
+another, which is what an application does under an automatic reconnect loop.
+It reports the race on the unfixed code and passes on the fixed one; it needs
+-race to mean anything.
+
+Found while running an MQTT client's own test suite under -race in a loop: it
+failed roughly once in a hundred runs of a session-recovery test that publishes
+at QoS 1 while the broker drops the session.
+
+Signed-off-by: Dean Gostiša <dean@black.si>
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+---
+ paho/session/state/state.go           | 12 +++-
+ paho/session/state/state_race_test.go | 92 +++++++++++++++++++++++++++
+ 2 files changed, 101 insertions(+), 3 deletions(-)
+ create mode 100644 paho/session/state/state_race_test.go
+
+diff --git a/paho/session/state/state.go b/paho/session/state/state.go
+index bd19704..fbcc13d 100644
+--- a/paho/session/state/state.go
++++ b/paho/session/state/state.go
+@@ -361,6 +361,12 @@ func (s *State) AddToSession(ctx context.Context, packet session.Packet, resp ch
+ 	}
+ 	// If the connection is lost whilst we are waiting, then in Acquire should terminate.
+ 	connCtx := s.connCtx
++	// The send quota belongs to the connection identified by connCtx above, and is
++	// replaced by ConAckReceived when a new connection is established. Take a
++	// reference to it here, under the mutex, rather than reading s.inflight later:
++	// Acquire may block, so it cannot be called while holding the mutex, and reading
++	// the field after unlocking races a reconnect replacing it.
++	inflight := s.inflight
+ 	s.mu.Unlock()
+ 
+ 	// If the connection drops while waiting we should abort
+@@ -376,7 +382,7 @@ func (s *State) AddToSession(ctx context.Context, packet session.Packet, resp ch
+ 
+ 	// Ensure only "RECEIVE MAXIMUM" PUBLISH transactions are in flight at any time
+ 	if pt == packets.PUBLISH {
+-		if err := s.inflight.Acquire(ctx); err != nil {
++		if err := inflight.Acquire(ctx); err != nil {
+ 			if connCtx.Err() != nil {
+ 				return session.ErrNoConnection
+ 			}
+@@ -392,7 +398,7 @@ func (s *State) AddToSession(ctx context.Context, packet session.Packet, resp ch
+ 	packetID, err := s.allocateNextPacketId(pt, resp)
+ 	if err != nil {
+ 		if pt == packets.PUBLISH {
+-			if qErr := s.inflight.Release(); qErr != nil {
++			if qErr := inflight.Release(); qErr != nil {
+ 				s.errors.Printf("quota release due to packet id issue: %s", qErr)
+ 			}
+ 		}
+@@ -404,7 +410,7 @@ func (s *State) AddToSession(ctx context.Context, packet session.Packet, resp ch
+ 			s.mu.Lock()
+ 			delete(s.clientPackets, packetID)
+ 			s.mu.Unlock()
+-			if qErr := s.inflight.Release(); qErr != nil {
++			if qErr := inflight.Release(); qErr != nil {
+ 				s.errors.Printf("quota release due to store issue: %s", qErr)
+ 			}
+ 			packet.SetIdentifier(0) // ensure the Message identifier is not used
+diff --git a/paho/session/state/state_race_test.go b/paho/session/state/state_race_test.go
+new file mode 100644
+index 0000000..2163b9c
+--- /dev/null
++++ b/paho/session/state/state_race_test.go
+@@ -0,0 +1,92 @@
++/*
++ * Copyright (c) 2026 Contributors to the Eclipse Foundation
++ *
++ *  All rights reserved. This program and the accompanying materials
++ *  are made available under the terms of the Eclipse Public License v2.0
++ *  and Eclipse Distribution License v1.0 which accompany this distribution.
++ *
++ * The Eclipse Public License is available at
++ *    https://www.eclipse.org/legal/epl-2.0/
++ *  and the Eclipse Distribution License is available at
++ *    http://www.eclipse.org/org/documents/edl-v10.php.
++ *
++ *  SPDX-License-Identifier: EPL-2.0 OR BSD-3-Clause
++ */
++
++package state
++
++import (
++	"context"
++	"io"
++	"sync"
++	"testing"
++
++	"github.com/eclipse/paho.golang/packets"
++	"github.com/eclipse/paho.golang/paho/session"
++)
++
++// TestAddToSessionWhileReconnecting checks that publishing while the connection
++// is being re-established does not race the send quota being replaced.
++//
++// ConAckReceived replaces the quota for the new connection, while AddToSession
++// acquires from it. AddToSession cannot hold the mutex over the acquire (that
++// call blocks by design), so it must take its own reference to the quota while
++// it does hold it. Reading the field afterwards is a data race with any
++// reconnect, which is a normal thing to happen under an automatic reconnect
++// loop while the application keeps publishing.
++//
++// Run with -race; without it this passes whether the bug is present or not.
++func TestAddToSessionWhileReconnecting(t *testing.T) {
++	t.Parallel()
++
++	s := NewInMemory()
++	defer s.Close()
++
++	connack := &packets.Connack{ReasonCode: 0, SessionPresent: false}
++	connect := &packets.Connect{}
++
++	if err := s.ConAckReceived(io.Discard, connect, connack); err != nil {
++		t.Fatalf("first ConAckReceived: %s", err)
++	}
++
++	const rounds = 200
++	var wg sync.WaitGroup
++
++	// One goroutine reconnects, as an automatic reconnect loop would.
++	wg.Add(1)
++	go func() {
++		defer wg.Done()
++		for range rounds {
++			if err := s.ConnectionLost(nil); err != nil {
++				t.Errorf("ConnectionLost: %s", err)
++				return
++			}
++			if err := s.ConAckReceived(io.Discard, connect, connack); err != nil {
++				t.Errorf("ConAckReceived: %s", err)
++				return
++			}
++		}
++	}()
++
++	// Another publishes throughout, as an application would. Whether any given
++	// attempt succeeds depends on the timing; that a successful one does not
++	// race the reconnect is the point.
++	wg.Add(1)
++	go func() {
++		defer wg.Done()
++		resp := make(chan packets.ControlPacket, 1)
++		for range rounds {
++			pub := packets.NewControlPacket(packets.PUBLISH)
++			pub.Content.(*packets.Publish).QoS = 1
++			err := s.AddToSession(context.Background(), pub.Content.(*packets.Publish), resp)
++			if err != nil && err != session.ErrNoConnection {
++				// Anything else is a real failure; a lost connection is the
++				// expected outcome of racing a disconnect.
++				t.Errorf("AddToSession: %s", err)
++				return
++			}
++		}
++	}()
++
++	wg.Wait()
++}
+-- 
+2.43.0
+

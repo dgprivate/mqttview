@@ -37,7 +37,14 @@ messages may be in flight. Losing an update to it means a client that either
 stalls waiting for capacity it already has, or exceeds the receive maximum the
 broker asked for.
 
-**Status:** not worked around here, because it cannot be from outside the
+**Status:** fixed, in a patch waiting to be submitted —
+`docs/upstream/paho-golang-inflight-race.patch`, with the reasoning and the
+checks in `docs/upstream/README.md`. `AddToSession` takes its reference to the
+quota under the mutex it already holds, rather than reading the field after
+releasing it; it cannot hold the mutex across the acquire, because that call
+blocks by design.
+
+Until the fix is released, there is nothing to do about it from outside the
 library: the window is exactly when autopaho reconnects on its own. The test
 that finds it is left in place rather than skipped — a build that fails once in
 a hundred runs with this stack is reporting something true.
