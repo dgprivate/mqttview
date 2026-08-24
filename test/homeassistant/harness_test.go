@@ -454,14 +454,35 @@ func readFile(t *testing.T, path string) string {
 	return string(raw)
 }
 
+var (
+	portMu    sync.Mutex
+	portsUsed = map[int]bool{}
+)
+
+// freePort asks the operating system for a port and refuses to hand out one
+// this process has already given away. A port closed a moment ago is one the
+// kernel will offer again, and two servers on one number is a test asserting
+// about somebody else's process. See the same helper in test/mosquitto, where
+// it cost an evening to work that out.
 func freePort(t *testing.T) int {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	portMu.Lock()
+	defer portMu.Unlock()
+
+	for range 100 {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := l.Addr().(*net.TCPAddr).Port
+		l.Close()
+		if !portsUsed[port] {
+			portsUsed[port] = true
+			return port
+		}
 	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
+	t.Fatal("no unused port after a hundred tries")
+	return 0
 }
 
 func decode(t *testing.T, resp *http.Response, into any) {

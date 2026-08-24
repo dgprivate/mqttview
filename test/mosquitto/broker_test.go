@@ -417,7 +417,34 @@ func startWith(t *testing.T, r runner, cfg config) *broker {
 
 	b.waitUntilListening(t, cfg)
 	b.checkVersion(t)
+	b.checkItIsOurs(t, cfg)
 	return b
+}
+
+// checkItIsOurs proves the broker answering on the port is the one this test
+// started. Something else holding it would make our own broker fail to bind
+// and exit, leaving the test talking to a stranger and asserting nonsense
+// about it.
+func (b *broker) checkItIsOurs(t *testing.T, cfg config) {
+	t.Helper()
+	if cfg.unixSocket {
+		return // a path it created is a path nobody else has
+	}
+	want := fmt.Sprintf("listen socket on port %d", b.port)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		log := b.log.String()
+		if strings.Contains(log, want) {
+			return
+		}
+		if strings.Contains(log, "Unable to bind") || strings.Contains(log, "Address already in use") {
+			t.Fatalf("port %d was taken by something else:\n%s", b.port, log)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the broker never said it bound port %d:\n%s", b.port, log)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // checkVersion reads the version out of the startup banner. Without it a
@@ -648,14 +675,39 @@ func write(t *testing.T, path, content string) {
 	}
 }
 
+var (
+	portMu    sync.Mutex
+	portsUsed = map[int]bool{}
+)
+
+// freePort asks the operating system for a port and then refuses to hand out
+// one this process has already given away.
+//
+// The bind-and-close trick alone is not enough: a port closed a moment ago is
+// a port the kernel will happily offer again, and with several brokers being
+// started at once that produced two tests sharing one number. The symptom was
+// worth the fix — a plain-TCP test reached another test's TLS listener and
+// reported "the broker closed the connection immediately", which is true,
+// unhelpful, and about a broker it was never supposed to be talking to.
 func freePort(t *testing.T) int {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	portMu.Lock()
+	defer portMu.Unlock()
+
+	for range 100 {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := l.Addr().(*net.TCPAddr).Port
+		l.Close()
+		if !portsUsed[port] {
+			portsUsed[port] = true
+			return port
+		}
 	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
+	t.Fatal("no unused port after a hundred tries")
+	return 0
 }
 
 type lockedBuffer struct {
