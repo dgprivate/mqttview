@@ -10,6 +10,11 @@ Fixes the data race between a reconnect and a publish in
 `eclipse/paho.golang`, described in `docs/UPSTREAM.md`. Written against
 `3115495` on `master` (v0.23.0 plus 19 commits).
 
+**Submitted as [eclipse-paho/paho.golang#341](https://github.com/eclipse-paho/paho.golang/pull/341).**
+The copy here is what to fall back on if that goes stale: `go mod edit -replace`
+against a patched checkout keeps mqttview building on a fixed library before
+one is released.
+
 Two files: three lines of `paho/session/state/state.go`, and a test that
 reproduces the race.
 
@@ -24,13 +29,13 @@ reproduces the race.
   that found this, and which failed about once in a hundred runs — ran 40
   times under `-race` against the patched library with no failures.
 
-### Opening the pull request
+### Opening it again, if it ever needs reopening
 
 Eclipse projects require the Eclipse Contributor Agreement, signed with the
 same email as the commit author. The commit is authored as
-`Dean Gostiša <dean@black.si>` and carries `Signed-off-by:` with that address,
-which is what their CI checks; if you sign the ECA with a different address,
-amend the commit to match.
+`Dean Gostiša <dean.gostisa@black.si>`, the address the agreement is signed
+with, and carries `Signed-off-by:` to match — which is what the `eclipsefdn/eca`
+check on the pull request verifies.
 
 ```bash
 git clone https://github.com/eclipse/paho.golang /tmp/paho.golang

@@ -37,12 +37,13 @@ messages may be in flight. Losing an update to it means a client that either
 stalls waiting for capacity it already has, or exceeds the receive maximum the
 broker asked for.
 
-**Status:** fixed, in a patch waiting to be submitted —
-`docs/upstream/paho-golang-inflight-race.patch`, with the reasoning and the
-checks in `docs/upstream/README.md`. `AddToSession` takes its reference to the
-quota under the mutex it already holds, rather than reading the field after
-releasing it; it cannot hold the mutex across the acquire, because that call
-blocks by design.
+**Status:** fixed and submitted —
+[eclipse-paho/paho.golang#341](https://github.com/eclipse-paho/paho.golang/pull/341).
+`AddToSession` takes its reference to the quota under the mutex it already
+holds, rather than reading the field after releasing it; it cannot hold the
+mutex across the acquire, because that call blocks by design. The same change
+is kept here as `docs/upstream/paho-golang-inflight-race.patch`, with the
+checks behind it in `docs/upstream/README.md`.
 
 Until the fix is released, there is nothing to do about it from outside the
 library: the window is exactly when autopaho reconnects on its own. The test

@@ -1,6 +1,6 @@
-From b75cd864cdf3c02f567e74edcc296c4d87a4cc33 Mon Sep 17 00:00:00 2001
-From: =?UTF-8?q?Dean=20Gosti=C5=A1a?= <dean@black.si>
-Date: Mon, 24 Aug 2026 09:01:28 +0000
+From b34d73c7e494b5b3011d582fa8a332e400a7296c Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Dean=20Gosti=C5=A1a?= <dean.gostisa@black.si>
+Date: Mon, 24 Aug 2026 09:02:40 +0000
 Subject: [PATCH] state: take the send quota under the mutex in AddToSession
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -41,7 +41,7 @@ Found while running an MQTT client's own test suite under -race in a loop: it
 failed roughly once in a hundred runs of a session-recovery test that publishes
 at QoS 1 while the broker drops the session.
 
-Signed-off-by: Dean Gostiša <dean@black.si>
+Signed-off-by: Dean Gostiša <dean.gostisa@black.si>
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 ---
  paho/session/state/state.go           | 12 +++-
