@@ -37,18 +37,21 @@ messages may be in flight. Losing an update to it means a client that either
 stalls waiting for capacity it already has, or exceeds the receive maximum the
 broker asked for.
 
-**Status:** fixed and submitted —
-[eclipse-paho/paho.golang#341](https://github.com/eclipse-paho/paho.golang/pull/341).
-`AddToSession` takes its reference to the quota under the mutex it already
-holds, rather than reading the field after releasing it; it cannot hold the
-mutex across the acquire, because that call blocks by design. The same change
-is kept here as `docs/upstream/paho-golang-inflight-race.patch`, with the
-checks behind it in `docs/upstream/README.md`.
+**Status:** fixed upstream —
+[eclipse-paho/paho.golang#341](https://github.com/eclipse-paho/paho.golang/pull/341),
+merged 2026-08-24. `AddToSession` takes its reference to the quota under the
+mutex it already holds, rather than reading the field after releasing it; it
+cannot hold the mutex across the acquire, because that call blocks by design.
 
-Until the fix is released, there is nothing to do about it from outside the
-library: the window is exactly when autopaho reconnects on its own. The test
-that finds it is left in place rather than skipped — a build that fails once in
-a hundred runs with this stack is reporting something true.
+mqttview is on it. There is no release carrying it yet — the newest tag,
+v0.23.0, predates it — so `go.mod` names the merge commit
+(`v0.23.1-0.20260824221508-ae76bd52efac`). Move to the tag when one appears;
+nothing here depends on the pseudo-version other than wanting the fix. The
+copy of the change is kept in `docs/upstream/` for reference.
+
+Since the update, `TestAnMQTT5SessionRecoversAfterTheBrokerRestarts` — the test
+that found this, and that failed roughly once in a hundred runs — has run 100
+times under `-race` on a deliberately loaded machine without a failure.
 
 ## eclipse-mosquitto 2.1 — an empty WebSocket frame ends the packet
 

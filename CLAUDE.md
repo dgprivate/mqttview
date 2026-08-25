@@ -183,12 +183,13 @@ is a silent authentication bypass, not a visible bug. Keep both dependencies
 current: govulncheck caught a signature-bypass advisory in goxmldsig within
 minutes of it being added here, and that is the whole reason the job exists.
 
-**Two defects live in dependencies, not here.** `docs/UPSTREAM.md` has both,
-with reproductions: a data race in paho.golang's session state between a
-reconnect and a publish — which is why the MQTT 5 session-recovery test fails
-about once in a hundred `-race` runs and is not skipped for it — and the
-Mosquitto 2.1 WebSocket behaviour below. Read that file before assuming a rare
-failure with a paho stack in it is ours.
+**Two defects were found in dependencies, not here,** and both are fixed
+upstream: a data race in paho.golang's session state between a reconnect and a
+publish, and the Mosquitto 2.1 WebSocket behaviour below. `docs/UPSTREAM.md`
+has both with reproductions and where each fix stands. The paho one is why
+`go.mod` names a commit rather than a tag — there is no release with the fix
+yet. Read that file before assuming a rare failure with a paho stack in it is
+ours.
 
 **MQTT 5 over WebSockets is dialled by us, not by autopaho.** `internal/mqttc/websocket_v5.go`
 exists because the library writes a packet in several pieces and one of them,
