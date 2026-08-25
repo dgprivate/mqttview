@@ -45,14 +45,13 @@ nothing, because it costs somebody else the time to discover otherwise.
 
 **Every change ships with tests.** Not "where it makes sense" — every change. A
 bug fix ships with the test that fails without it. CI enforces a coverage floor
-of 88%; raise it as the number rises, and never lower it to make a build pass.
+of 90%; raise it as the number rises, and never lower it to make a build pass.
 
-That 88 is deliberately below the 90.6 a developer machine measures. The gap is
-the runner: 127 of 550 functions cover slightly less on a slower, smaller box,
-because a ticker fires fewer times or `runtime.NumCPU` takes another branch.
-Some of that is irreducible. Some of it is tests that pass without exercising
-what they claim — a long poll whose goroutine fires after the assertion — and
-those are bugs in the tests. Fix them and put the floor back to 90.
+It used to be 88.5, to allow for a runner covering less than a developer
+machine. Most of that gap turned out to be tests that passed without exercising
+what they claimed — a long poll whose goroutine fired after the assertion —
+which are bugs in the tests, not in the runner. Fixing them closed it and
+turned up four real defects on the way.
 
 Reaching a number is not the point, and a test written only to touch a line is
 worse than no test: it locks in whatever the code does today. Several of the

@@ -92,22 +92,19 @@ jobs:
       # later. Raise it when the number rises; never lower it to make a build
       # pass.
       #
-      # 88.5, while a developer machine measures 90.9 on the same commit. The
-      # difference is the runner, not the code: functions that read
-      # runtime.NumCPU or wait on a ticker cover slightly less on a smaller,
-      # slower box. The tests that were merely sleeping and hoping have been
-      # fixed — that closed some of the gap and turned up two real defects —
-      # and what is left is mostly irreducible.
-      #
-      # The floor sits a little under what CI actually measures, so a normal
-      # run has room and a deleted test still fails the build.
+      # 90, restored from 88.5. The gap it allowed for — a runner covering less
+      # than a developer machine, because a ticker fires fewer times or
+      # runtime.NumCPU takes another branch — turned out to be mostly tests
+      # that passed without exercising what they claimed. Fixing those closed
+      # it: this runner now measures 90.3 on the same commit a laptop measures
+      # 90.1, and four real defects came out of the exercise.
       - name: Coverage
         run: |
           go test -coverpkg=./internal/...,./cmd/... -coverprofile=coverage.out ./cmd/... ./internal/...
           go tool cover -func=coverage.out | tail -1
 
           total=$(go tool cover -func=coverage.out | tail -1 | grep -oE '[0-9]+\.[0-9]+')
-          floor=88.5
+          floor=90
           echo "total ${total}%, floor ${floor}%"
           awk -v t="$total" -v f="$floor" 'BEGIN { if (t+0 < f+0) { print "coverage fell below the floor"; exit 1 } }'
 
