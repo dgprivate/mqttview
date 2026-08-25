@@ -165,13 +165,7 @@ func (r *Runtime) List() []Info {
 
 	out := make([]Info, 0, len(r.instances))
 	for _, inst := range r.instances {
-		out = append(out, Info{
-			Meta:     inst.meta,
-			Enabled:  inst.enabled,
-			Error:    inst.lastErr,
-			Settings: inst.settings,
-			Dropped:  inst.dropped.Load(),
-		})
+		out = append(out, inst.info())
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Meta.Name < out[j].Meta.Name })
 	return out
@@ -185,13 +179,30 @@ func (r *Runtime) Get(id string) (Info, bool) {
 	if !ok {
 		return Info{}, false
 	}
+	return inst.info(), true
+}
+
+// info is what a caller outside the runtime may hold on to.
+//
+// The settings map is copied rather than handed over. Today the runtime
+// replaces that map instead of writing into it, so sharing it would happen to
+// be safe — but "happens to be safe as long as nobody writes to a published
+// map" is exactly the arrangement that produced a data race in the Home
+// Assistant registry, where an HTTP handler serialised a map while a message
+// updated it. A copy of a handful of settings costs nothing next to the JSON
+// encoding the caller is about to do.
+func (i *instance) info() Info {
+	settings := make(map[string]any, len(i.settings))
+	for k, v := range i.settings {
+		settings[k] = v
+	}
 	return Info{
-		Meta:     inst.meta,
-		Enabled:  inst.enabled,
-		Error:    inst.lastErr,
-		Settings: inst.settings,
-		Dropped:  inst.dropped.Load(),
-	}, true
+		Meta:     i.meta,
+		Enabled:  i.enabled,
+		Error:    i.lastErr,
+		Settings: settings,
+		Dropped:  i.dropped.Load(),
+	}
 }
 
 // SetEnabled turns a plugin on or off and persists the choice.

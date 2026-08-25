@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -267,4 +268,63 @@ func unregisterAfter(t *testing.T, id string) {
 		delete(registry, id)
 		registryMu.Unlock()
 	})
+}
+
+func TestListedSettingsAreNotTheRuntimesOwnMap(t *testing.T) {
+	// The panel polls the plugin list while somebody edits a plugin's
+	// settings, and the list is serialised to JSON outside the runtime's lock.
+	// Handing out the live map makes that a data race — the one that was found
+	// in the Home Assistant registry, in a package that had the same shape.
+	//
+	// Run with -race; without it this proves only that nothing panics.
+	rt, _, _, _ := newRuntime(t)
+	id := "recorder-" + t.Name()
+	if err := rt.Start(t.Context(), map[string]Defaults{id: {Enabled: true}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rt.Stop)
+
+	if err := rt.SaveSettings(t.Context(), id, map[string]any{"prefix": "a"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = rt.SaveSettings(t.Context(), id, map[string]any{"prefix": strconv.Itoa(i)})
+		}
+	}()
+
+	for range 200 {
+		for _, info := range rt.List() {
+			for k, v := range info.Settings { // what an encoder does
+				_, _ = k, v
+			}
+		}
+		if info, ok := rt.Get(id); ok {
+			for k, v := range info.Settings {
+				_, _ = k, v
+			}
+			// Mutating what we were given must not reach the runtime.
+			info.Settings["injected"] = true
+		}
+	}
+
+	close(stop)
+	wg.Wait()
+
+	if info, ok := rt.Get(id); ok {
+		if _, leaked := info.Settings["injected"]; leaked {
+			t.Error("a caller's write reached the runtime's own settings")
+		}
+	}
 }
