@@ -286,8 +286,9 @@ type Conn struct {
 	// broker that is still unreachable from one the user has disconnected.
 	wantConnect bool
 
-	tree    *Tree
-	history *History
+	tree     *Tree
+	history  *History
+	topicLog *TopicLog
 
 	// ephemeral holds subscriptions owned by plugins. They are re-applied on
 	// every connect but never written to the stored connection definition.
@@ -304,6 +305,7 @@ func newConn(m *Manager, spec ConnectionSpec) *Conn {
 		spec:      spec,
 		tree:      NewTree(),
 		history:   NewHistory(spec.HistorySize),
+		topicLog:  NewTopicLog(spec.TopicLogEntries, spec.TopicLogBudget),
 		ephemeral: map[string]Subscription{},
 		status: Status{
 			ConnectionID: spec.ID,
@@ -327,6 +329,10 @@ func (c *Conn) Tree() *Tree { return c.tree }
 
 // History exposes the recent-message ring.
 func (c *Conn) History() *History { return c.history }
+
+// TopicLog exposes the per-topic history behind the timeline, the diff and
+// the charts.
+func (c *Conn) TopicLog() *TopicLog { return c.topicLog }
 
 // Status returns the current connection status.
 func (c *Conn) Status() Status {
@@ -610,6 +616,7 @@ func (c *Conn) Publish(ctx context.Context, req PublishRequest) error {
 func (c *Conn) ClearState() {
 	c.tree.Clear()
 	c.history.Clear()
+	c.topicLog.Clear()
 }
 
 func (c *Conn) events() Events {
@@ -642,6 +649,7 @@ func (c *Conn) handleMessage(m Message) {
 	c.received.Add(1)
 	c.tree.Record(m)
 	c.history.Add(m)
+	c.topicLog.Add(m)
 	c.mgr.emitMessage(m)
 }
 

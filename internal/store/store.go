@@ -170,6 +170,21 @@ CREATE TABLE recovery_codes (
 CREATE INDEX recovery_codes_user_idx ON recovery_codes(user_id);
 `,
 	},
+	{
+		name: "0003_topic_log",
+		stmt: `
+-- The per-topic history behind the timeline, the diff and the charts. Both
+-- are bounds, not sizes: 0 means "take the package default", so an existing
+-- connection keeps working without anybody editing it.
+--
+-- The budget is bytes of payload held across every topic at once, which is
+-- the number that actually decides how much memory a busy broker costs. The
+-- entry count alone cannot: it bounds one topic, and a broker's topic count
+-- is not something mqttview chooses.
+ALTER TABLE connections ADD COLUMN topic_log_entries INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE connections ADD COLUMN topic_log_budget INTEGER NOT NULL DEFAULT 0;
+`,
+	},
 }
 
 func (s *Store) migrate() error {

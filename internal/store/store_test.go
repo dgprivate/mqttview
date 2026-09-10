@@ -730,3 +730,66 @@ func TestAConnectionWrittenBeforeTheKeyWasEncryptedStillLoads(t *testing.T) {
 		t.Errorf("tls = %+v", got.Spec.TLS)
 	}
 }
+
+// The topic-log bounds are per connection and have to survive a round trip,
+// or a budget somebody set is silently the default on the next restart.
+func TestTopicLogBoundsSurviveARoundTrip(t *testing.T) {
+	st := newTestStore(t)
+	u := newTestUser(t, st)
+
+	spec := mqttc.ConnectionSpec{
+		ID:              uuid.NewString(),
+		Name:            "bounded",
+		URL:             "mqtt://broker.example.com:1883",
+		Version:         mqttc.V311,
+		TopicLogEntries: 25,
+		TopicLogBudget:  4 << 20,
+	}
+	if err := st.SaveConnection(ConnectionRecord{Spec: spec, CreatedBy: u.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := st.GetConnection(spec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Spec.TopicLogEntries != 25 {
+		t.Errorf("entries per topic = %d, want 25", got.Spec.TopicLogEntries)
+	}
+	if got.Spec.TopicLogBudget != 4<<20 {
+		t.Errorf("budget = %d, want %d", got.Spec.TopicLogBudget, 4<<20)
+	}
+}
+
+// A connection written before migration 0003 has no value in either column.
+// Zero has to keep meaning "take the default", or the upgrade turns every
+// existing connection into one that keeps no per-topic history at all.
+func TestAConnectionFromBeforeTheTopicLogKeepsWorking(t *testing.T) {
+	st := newTestStore(t)
+	u := newTestUser(t, st)
+
+	spec := mqttc.ConnectionSpec{
+		ID:      uuid.NewString(),
+		Name:    "older",
+		URL:     "mqtt://broker.example.com:1883",
+		Version: mqttc.V311,
+	}
+	if err := st.SaveConnection(ConnectionRecord{Spec: spec, CreatedBy: u.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := st.GetConnection(spec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Spec.TopicLogEntries != 0 || got.Spec.TopicLogBudget != 0 {
+		t.Fatalf("bounds are %d/%d, want the zero that means 'default'",
+			got.Spec.TopicLogEntries, got.Spec.TopicLogBudget)
+	}
+	// And zero has to actually produce a working log, not an empty one.
+	log := mqttc.NewTopicLog(got.Spec.TopicLogEntries, got.Spec.TopicLogBudget)
+	if s := log.Stats(); s.EntriesPer != mqttc.DefaultTopicLogEntries || s.Budget != mqttc.DefaultTopicLogBudget {
+		t.Errorf("a zeroed spec built a log of %d entries and %d bytes, want the package defaults",
+			s.EntriesPer, s.Budget)
+	}
+}

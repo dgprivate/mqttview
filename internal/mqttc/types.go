@@ -120,6 +120,12 @@ type ConnectionSpec struct {
 	// HistorySize caps the per-connection message ring buffer. 0 uses the
 	// package default.
 	HistorySize int `json:"historySize,omitempty"`
+
+	// TopicLogEntries caps how many messages are kept per topic for the
+	// timeline and the charts, and TopicLogBudget caps the payload bytes held
+	// across every topic at once. Both 0 take the package defaults.
+	TopicLogEntries int   `json:"topicLogEntries,omitempty"`
+	TopicLogBudget  int64 `json:"topicLogBudget,omitempty"`
 }
 
 // Normalize fills in defaults and rejects specs we cannot honour. It is called
@@ -285,6 +291,9 @@ type Message struct {
 	// Seq is a per-connection monotonic counter, used by the UI to detect
 	// gaps after a reconnect and to key list rows.
 	Seq uint64 `json:"seq"`
+	// Truncated says the payload was clipped to fit a bounded store, so the
+	// UI can say so rather than presenting half a document as the whole one.
+	Truncated bool `json:"truncated,omitempty"`
 	// Props are MQTT 5 publish properties; nil on 3.x.
 	Props *MessageProps `json:"props,omitempty"`
 }

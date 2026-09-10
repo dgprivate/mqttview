@@ -37,6 +37,15 @@ func (s *Server) mountConnections(r chi.Router) {
 			r.Get("/topic", s.handleTopic)
 			r.Get("/messages", s.handleMessages)
 			r.Get("/search", s.handleSearch)
+
+			// One topic's own past, which the shared message ring cannot
+			// answer: timeline, diff against the previous value, a numeric
+			// series to chart, and the same data as a file.
+			r.Get("/topic/history", s.handleTopicHistory)
+			r.Get("/topic/diff", s.handleTopicDiff)
+			r.Get("/topic/series", s.handleTopicSeries)
+			r.Get("/topic/fields", s.handleTopicFields)
+			r.Get("/topic/export", s.handleTopicExport)
 		})
 	})
 }
@@ -45,25 +54,27 @@ func (s *Server) mountConnections(r chi.Router) {
 // the broker password or private key: those are write-only from the API's
 // point of view.
 type connectionView struct {
-	ID             string               `json:"id"`
-	Name           string               `json:"name"`
-	URL            string               `json:"url"`
-	Version        string               `json:"version"`
-	ClientID       string               `json:"clientId"`
-	Username       string               `json:"username"`
-	HasPassword    bool                 `json:"hasPassword"`
-	KeepAlive      int                  `json:"keepAlive"`
-	CleanStart     bool                 `json:"cleanStart"`
-	SessionExpiry  uint32               `json:"sessionExpiry"`
-	ConnectTimeout int                  `json:"connectTimeout"`
-	TLS            tlsView              `json:"tls"`
-	Will           *mqttc.Will          `json:"will,omitempty"`
-	Subscriptions  []mqttc.Subscription `json:"subscriptions"`
-	AutoConnect    bool                 `json:"autoConnect"`
-	HistorySize    int                  `json:"historySize"`
-	Status         mqttc.Status         `json:"status"`
-	Topics         int                  `json:"topics"`
-	TreeFull       bool                 `json:"treeFull"`
+	ID              string               `json:"id"`
+	Name            string               `json:"name"`
+	URL             string               `json:"url"`
+	Version         string               `json:"version"`
+	ClientID        string               `json:"clientId"`
+	Username        string               `json:"username"`
+	HasPassword     bool                 `json:"hasPassword"`
+	KeepAlive       int                  `json:"keepAlive"`
+	CleanStart      bool                 `json:"cleanStart"`
+	SessionExpiry   uint32               `json:"sessionExpiry"`
+	ConnectTimeout  int                  `json:"connectTimeout"`
+	TLS             tlsView              `json:"tls"`
+	Will            *mqttc.Will          `json:"will,omitempty"`
+	Subscriptions   []mqttc.Subscription `json:"subscriptions"`
+	AutoConnect     bool                 `json:"autoConnect"`
+	HistorySize     int                  `json:"historySize"`
+	TopicLogEntries int                  `json:"topicLogEntries"`
+	TopicLogBudget  int64                `json:"topicLogBudget"`
+	Status          mqttc.Status         `json:"status"`
+	Topics          int                  `json:"topics"`
+	TreeFull        bool                 `json:"treeFull"`
 }
 
 // tlsView mirrors mqttc.TLSSpec but reports only whether secret material is
@@ -100,33 +111,37 @@ func viewOf(c *mqttc.Conn) connectionView {
 			HasCA:              spec.TLS.CAPEM != "",
 			HasClientCert:      spec.TLS.ClientCertPEM != "",
 		},
-		Will:          spec.Will,
-		Subscriptions: spec.Subscriptions,
-		AutoConnect:   spec.AutoConnect,
-		HistorySize:   spec.HistorySize,
-		Status:        c.Status(),
-		Topics:        topics,
-		TreeFull:      full,
+		Will:            spec.Will,
+		Subscriptions:   spec.Subscriptions,
+		AutoConnect:     spec.AutoConnect,
+		HistorySize:     spec.HistorySize,
+		TopicLogEntries: spec.TopicLogEntries,
+		TopicLogBudget:  spec.TopicLogBudget,
+		Status:          c.Status(),
+		Topics:          topics,
+		TreeFull:        full,
 	}
 }
 
 // connectionRequest is the write shape. Secret fields are optional on update:
 // omitting them keeps whatever is already stored.
 type connectionRequest struct {
-	Name          string               `json:"name"`
-	URL           string               `json:"url"`
-	Version       string               `json:"version"`
-	ClientID      string               `json:"clientId"`
-	Username      string               `json:"username"`
-	Password      *string              `json:"password"`
-	KeepAlive     int                  `json:"keepAlive"`
-	CleanStart    bool                 `json:"cleanStart"`
-	SessionExpiry uint32               `json:"sessionExpiry"`
-	TLS           tlsRequest           `json:"tls"`
-	Will          *mqttc.Will          `json:"will"`
-	Subscriptions []mqttc.Subscription `json:"subscriptions"`
-	AutoConnect   bool                 `json:"autoConnect"`
-	HistorySize   int                  `json:"historySize"`
+	Name            string               `json:"name"`
+	URL             string               `json:"url"`
+	Version         string               `json:"version"`
+	ClientID        string               `json:"clientId"`
+	Username        string               `json:"username"`
+	Password        *string              `json:"password"`
+	KeepAlive       int                  `json:"keepAlive"`
+	CleanStart      bool                 `json:"cleanStart"`
+	SessionExpiry   uint32               `json:"sessionExpiry"`
+	TLS             tlsRequest           `json:"tls"`
+	Will            *mqttc.Will          `json:"will"`
+	Subscriptions   []mqttc.Subscription `json:"subscriptions"`
+	AutoConnect     bool                 `json:"autoConnect"`
+	HistorySize     int                  `json:"historySize"`
+	TopicLogEntries int                  `json:"topicLogEntries"`
+	TopicLogBudget  int64                `json:"topicLogBudget"`
 }
 
 type tlsRequest struct {
@@ -148,19 +163,21 @@ func (req connectionRequest) toSpec(id string, prev *mqttc.ConnectionSpec) (mqtt
 	}
 
 	spec := mqttc.ConnectionSpec{
-		ID:            id,
-		Name:          req.Name,
-		URL:           req.URL,
-		Version:       version,
-		ClientID:      req.ClientID,
-		Username:      req.Username,
-		KeepAlive:     req.KeepAlive,
-		CleanStart:    req.CleanStart,
-		SessionExpiry: req.SessionExpiry,
-		Will:          req.Will,
-		Subscriptions: req.Subscriptions,
-		AutoConnect:   req.AutoConnect,
-		HistorySize:   req.HistorySize,
+		ID:              id,
+		Name:            req.Name,
+		URL:             req.URL,
+		Version:         version,
+		ClientID:        req.ClientID,
+		Username:        req.Username,
+		KeepAlive:       req.KeepAlive,
+		CleanStart:      req.CleanStart,
+		SessionExpiry:   req.SessionExpiry,
+		Will:            req.Will,
+		Subscriptions:   req.Subscriptions,
+		AutoConnect:     req.AutoConnect,
+		HistorySize:     req.HistorySize,
+		TopicLogEntries: req.TopicLogEntries,
+		TopicLogBudget:  req.TopicLogBudget,
 		TLS: mqttc.TLSSpec{
 			InsecureSkipVerify: req.TLS.InsecureSkipVerify,
 			ServerName:         req.TLS.ServerName,

@@ -20,7 +20,8 @@ type ConnectionRecord struct {
 
 const connectionColumns = `id, name, url, version, client_id, username, password_enc,
     keep_alive, clean_start, session_expiry, connect_timeout, tls_json, will_json,
-    subscriptions_json, auto_connect, history_size, created_by, created_at, updated_at`
+    subscriptions_json, auto_connect, history_size, topic_log_entries, topic_log_budget,
+    created_by, created_at, updated_at`
 
 // SaveConnection inserts or replaces a connection definition. The broker
 // password and the TLS settings are encrypted before they are written.
@@ -70,7 +71,7 @@ func (s *Store) SaveConnection(rec ConnectionRecord) error {
 
 	_, err = s.db.Exec(
 		`INSERT INTO connections (`+connectionColumns+`)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             url = excluded.url,
@@ -87,10 +88,13 @@ func (s *Store) SaveConnection(rec ConnectionRecord) error {
             subscriptions_json = excluded.subscriptions_json,
             auto_connect = excluded.auto_connect,
             history_size = excluded.history_size,
+            topic_log_entries = excluded.topic_log_entries,
+            topic_log_budget = excluded.topic_log_budget,
             updated_at = excluded.updated_at`,
 		spec.ID, spec.Name, spec.URL, int(spec.Version), spec.ClientID, spec.Username, passwordEnc,
 		spec.KeepAlive, boolToInt(spec.CleanStart), spec.SessionExpiry, spec.ConnectTimeout,
 		tlsJSON, willJSON, string(subsJSON), boolToInt(spec.AutoConnect), spec.HistorySize,
+		spec.TopicLogEntries, spec.TopicLogBudget,
 		nullIfEmpty(rec.CreatedBy), rec.CreatedAt.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("store: save connection: %w", err)
@@ -149,6 +153,7 @@ func (s *Store) scanConnection(row rowScanner) (ConnectionRecord, error) {
 	err := row.Scan(&spec.ID, &spec.Name, &spec.URL, &version, &spec.ClientID, &spec.Username,
 		&passwordEn, &spec.KeepAlive, &cleanStart, &spec.SessionExpiry, &spec.ConnectTimeout,
 		&tlsJSON, &willJSON, &subsJSON, &autoConn, &spec.HistorySize,
+		&spec.TopicLogEntries, &spec.TopicLogBudget,
 		&createdBy, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ConnectionRecord{}, ErrNotFound
