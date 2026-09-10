@@ -49,6 +49,10 @@ func (s *Server) mountConnections(r chi.Router) {
 			// What the broker says about itself.
 			r.Get("/sys", s.handleBrokerStats)
 
+			// Watch for a fixed window and report what arrived. For callers
+			// that hold no broker credentials of their own.
+			r.Get("/collect", s.handleCollect)
+
 			// What has been sent, and what somebody chose to keep.
 			r.Get("/publishes", s.handlePublishHistory)
 			r.With(s.auth.RequireRole(store.RoleOperator)).Delete("/publishes", s.handleClearPublishHistory)

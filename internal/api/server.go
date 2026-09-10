@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -33,6 +34,12 @@ type Server struct {
 	hub     *hub.Hub
 	plugins *plugin.Runtime
 	web     fs.FS
+
+	// leases counts the collection windows holding an ephemeral subscription,
+	// keyed by connection and filter, so two overlapping windows on the same
+	// filter do not unsubscribe each other.
+	leaseMu sync.Mutex
+	leases  map[string]int
 	// version is reported by /api/health and shown in the UI footer.
 	version string
 }
@@ -62,6 +69,7 @@ func New(o Options) *Server {
 		cfg:     o.Config,
 		log:     log,
 		db:      o.Store,
+		leases:  map[string]int{},
 		auth:    o.Auth,
 		mqtt:    o.MQTT,
 		hub:     o.Hub,

@@ -31,6 +31,12 @@ type fakeMqttview struct {
 	expire atomic.Bool
 	// mappingError makes the plugin refuse a write with that message.
 	mappingError string
+
+	// connections and collection are what the general API returns, as opposed
+	// to the plugin's own endpoints above.
+	connections    []ConnectionSummary
+	collection     Collection
+	collectQueries []string
 }
 
 func newFake(t *testing.T) *fakeMqttview {
@@ -117,6 +123,18 @@ func newFake(t *testing.T) *fakeMqttview {
 		_ = json.NewDecoder(r.Body).Decode(&m)
 		f.mappings = append(f.mappings, m)
 		writeJSON(w, m)
+	}))
+
+	mux.HandleFunc("/api/connections", authed(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, f.connections)
+	}))
+	mux.HandleFunc("/api/connections/", authed(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/collect") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		f.collectQueries = append(f.collectQueries, r.URL.RawQuery)
+		writeJSON(w, f.collection)
 	}))
 
 	f.srv = httptest.NewServer(mux)
@@ -692,4 +710,163 @@ func TestASessionThatExpiresDuringAWriteIsNotSilentlyLost(t *testing.T) {
 	if _, err := c.SetMapping(context.Background(), "", plc.Mapping{Name: "DI-1-1", Label: "Kitchen"}); err == nil {
 		t.Fatal("a write against an expired session reported success")
 	}
+}
+
+// The whole point of the tool: an agent asks what the broker is doing and gets
+// told, without ever being handed a broker address, a password or a
+// certificate.
+func TestCollectReturnsWhatTheBrokerPublished(t *testing.T) {
+	f := newFake(t)
+	f.connections = []ConnectionSummary{{ID: "conn-1", Name: "house"}}
+	f.collection = Collection{
+		Filter:  "zigbee2mqtt/#",
+		Seconds: 10,
+		Messages: []CollectedMessage{
+			{Topic: "zigbee2mqtt/button", Payload: `{"action":"single"}`, Size: 19},
+		},
+		Topics: map[string]int{"zigbee2mqtt/button": 1},
+	}
+
+	tl := newTools(t, f, "")
+	_, out, err := tl.collect(context.Background(), nil, collectInput{
+		Seconds: 10, Filter: "zigbee2mqtt/#",
+	})
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+
+	if out.Count != 1 {
+		t.Fatalf("count = %d, want 1", out.Count)
+	}
+	if out.Messages[0].Topic != "zigbee2mqtt/button" {
+		t.Errorf("topic = %q", out.Messages[0].Topic)
+	}
+	if out.Topics["zigbee2mqtt/button"] != 1 {
+		t.Errorf("topic counts = %v", out.Topics)
+	}
+	if out.Note != "" {
+		t.Errorf("a window with messages carried the empty-result note: %q", out.Note)
+	}
+
+	if len(f.collectQueries) != 1 {
+		t.Fatalf("made %d collect requests, want 1", len(f.collectQueries))
+	}
+	for _, want := range []string{"seconds=10", "filter=zigbee2mqtt%2F%23"} {
+		if !strings.Contains(f.collectQueries[0], want) {
+			t.Errorf("query %q does not carry %q", f.collectQueries[0], want)
+		}
+	}
+}
+
+// An agent that reads a count of zero reaches for a different tool. Saying so
+// in words is what stops that.
+func TestAQuietWindowComesBackWithAnExplanationRatherThanJustZero(t *testing.T) {
+	f := newFake(t)
+	f.connections = []ConnectionSummary{{ID: "conn-1", Name: "house"}}
+	f.collection = Collection{Filter: "#", Seconds: 5}
+
+	tl := newTools(t, f, "")
+	_, out, err := tl.collect(context.Background(), nil, collectInput{Seconds: 5})
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+
+	if out.Count != 0 {
+		t.Fatalf("count = %d, want 0", out.Count)
+	}
+	if out.Note == "" {
+		t.Error("an empty window carried no explanation, so it reads as a broken tool")
+	}
+}
+
+func TestATruncatedWindowSaysHowMuchItMissed(t *testing.T) {
+	f := newFake(t)
+	f.connections = []ConnectionSummary{{ID: "conn-1"}}
+	f.collection = Collection{
+		Filter: "#", Messages: []CollectedMessage{{Topic: "a"}}, Dropped: 41, Truncated: true,
+	}
+
+	tl := newTools(t, f, "")
+	_, out, err := tl.collect(context.Background(), nil, collectInput{})
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if !out.Truncated || out.Dropped != 41 {
+		t.Errorf("truncated = %v, dropped = %d; want the shortfall carried through",
+			out.Truncated, out.Dropped)
+	}
+}
+
+// One broker is the common installation, and making an agent name it every
+// time is friction for nothing.
+func TestASingleConnectionNeedsNoNaming(t *testing.T) {
+	f := newFake(t)
+	f.connections = []ConnectionSummary{{ID: "only-one", Name: "house"}}
+
+	tl := newTools(t, f, "")
+	got, err := tl.resolveConnection(context.Background(), "")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != "only-one" {
+		t.Errorf("resolved to %q, want the only connection", got)
+	}
+}
+
+// Collecting from the wrong broker looks like a working call that returns the
+// wrong world, so a choice is refused rather than guessed.
+func TestSeveralConnectionsAreRefusedRatherThanGuessedBetween(t *testing.T) {
+	f := newFake(t)
+	f.connections = []ConnectionSummary{
+		{ID: "a", Name: "house"}, {ID: "b", Name: "workshop"},
+	}
+
+	tl := newTools(t, f, "")
+	_, err := tl.resolveConnection(context.Background(), "")
+	if err == nil {
+		t.Fatal("one of two brokers was picked without being asked")
+	}
+	for _, want := range []string{"house", "workshop", "connection_id"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error does not mention %q: %v", want, err)
+		}
+	}
+}
+
+func TestAConfiguredConnectionWinsOverLookingOneUp(t *testing.T) {
+	f := newFake(t)
+	f.connections = []ConnectionSummary{{ID: "a"}, {ID: "b"}}
+
+	tl := newTools(t, f, "configured")
+	got, err := tl.resolveConnection(context.Background(), "")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != "configured" {
+		t.Errorf("resolved to %q, want the configured connection", got)
+	}
+}
+
+func TestNoConnectionsAtAllIsSaidPlainly(t *testing.T) {
+	f := newFake(t)
+
+	tl := newTools(t, f, "")
+	_, err := tl.resolveConnection(context.Background(), "")
+	if err == nil || !strings.Contains(err.Error(), "no broker connections") {
+		t.Errorf("error = %v, want it to say there are none configured", err)
+	}
+}
+
+// newTools builds the tool set against the fake, signed in.
+func newTools(t *testing.T, f *fakeMqttview, connectionID string) *tools {
+	t.Helper()
+
+	client, err := NewClient(f.srv.URL, "person@example.com", "right")
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	if err := client.Login(context.Background()); err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	return &tools{client: client, connectionID: connectionID}
 }

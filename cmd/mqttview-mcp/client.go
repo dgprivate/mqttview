@@ -87,30 +87,9 @@ func (c *Client) loginLocked(ctx context.Context) error {
 // get fetches a plugin endpoint into out, logging in first if needed and
 // retrying once when the session has expired underneath us.
 func (c *Client) get(ctx context.Context, path string, query url.Values, out any) error {
-	c.mu.Lock()
-	if !c.loggedIn {
-		if err := c.loginLocked(ctx); err != nil {
-			c.mu.Unlock()
-			return err
-		}
-	}
-	c.mu.Unlock()
-
-	status, err := c.doGet(ctx, path, query, out)
+	status, err := c.fetch(ctx, pluginPath+path, query, out)
 	if err != nil {
 		return err
-	}
-	if status == http.StatusUnauthorized {
-		c.mu.Lock()
-		c.loggedIn = false
-		err := c.loginLocked(ctx)
-		c.mu.Unlock()
-		if err != nil {
-			return err
-		}
-		if status, err = c.doGet(ctx, path, query, out); err != nil {
-			return err
-		}
 	}
 
 	switch status {
@@ -123,8 +102,54 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, out any
 	}
 }
 
+// getAPI reads from mqttview's own API rather than the plugin's. The
+// not-found message above is about the plugin and would be actively
+// misleading here, which is why this is a separate path and not a flag.
+func (c *Client) getAPI(ctx context.Context, path string, query url.Values, out any) error {
+	status, err := c.fetch(ctx, "/api"+path, query, out)
+	if err != nil {
+		return err
+	}
+	if status == http.StatusOK {
+		return nil
+	}
+	return fmt.Errorf("mqttview returned %s for %s", http.StatusText(status), path)
+}
+
+// fetch signs in if needed, makes the request, and signs in again once if the
+// session had expired underneath it. An MCP server is long-lived and mostly
+// idle, so an expired session is the normal case rather than the exception.
+func (c *Client) fetch(ctx context.Context, path string, query url.Values, out any) (int, error) {
+	c.mu.Lock()
+	if !c.loggedIn {
+		if err := c.loginLocked(ctx); err != nil {
+			c.mu.Unlock()
+			return 0, err
+		}
+	}
+	c.mu.Unlock()
+
+	status, err := c.doGet(ctx, path, query, out)
+	if err != nil {
+		return 0, err
+	}
+	if status == http.StatusUnauthorized {
+		c.mu.Lock()
+		c.loggedIn = false
+		err := c.loginLocked(ctx)
+		c.mu.Unlock()
+		if err != nil {
+			return 0, err
+		}
+		if status, err = c.doGet(ctx, path, query, out); err != nil {
+			return 0, err
+		}
+	}
+	return status, nil
+}
+
 func (c *Client) doGet(ctx context.Context, path string, query url.Values, out any) (int, error) {
-	u := c.base + pluginPath + path
+	u := c.base + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
@@ -276,4 +301,62 @@ func (c *Client) Edges(ctx context.Context, connectionID string, since uint64, l
 	var page EdgePage
 	err := c.get(ctx, "/edges", q, &page)
 	return page, err
+}
+
+// ConnectionSummary is as much of a broker connection as the tools need.
+type ConnectionSummary struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	Status struct {
+		State string `json:"state"`
+	} `json:"status"`
+}
+
+// Connections lists the brokers mqttview knows about.
+func (c *Client) Connections(ctx context.Context) ([]ConnectionSummary, error) {
+	var out []ConnectionSummary
+	err := c.getAPI(ctx, "/connections", nil, &out)
+	return out, err
+}
+
+// CollectedMessage is one message seen during a collection window.
+type CollectedMessage struct {
+	ReceivedAt time.Time `json:"receivedAt"`
+	Topic      string    `json:"topic"`
+	Payload    string    `json:"payload"`
+	Base64     bool      `json:"base64"`
+	Size       int       `json:"size"`
+	QoS        byte      `json:"qos"`
+	Retain     bool      `json:"retain"`
+}
+
+// Collection is the result of one window.
+type Collection struct {
+	Filter    string             `json:"filter"`
+	Started   time.Time          `json:"started"`
+	Ended     time.Time          `json:"ended"`
+	Seconds   float64            `json:"seconds"`
+	Messages  []CollectedMessage `json:"messages"`
+	Topics    map[string]int     `json:"topics"`
+	Dropped   int                `json:"dropped"`
+	Truncated bool               `json:"truncated"`
+}
+
+// Collect watches a connection for a window and returns what arrived.
+func (c *Client) Collect(ctx context.Context, connectionID, filter string, seconds, limit int) (Collection, error) {
+	q := url.Values{}
+	if filter != "" {
+		q.Set("filter", filter)
+	}
+	if seconds > 0 {
+		q.Set("seconds", strconv.Itoa(seconds))
+	}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+
+	var out Collection
+	err := c.getAPI(ctx, "/connections/"+url.PathEscape(connectionID)+"/collect", q, &out)
+	return out, err
 }

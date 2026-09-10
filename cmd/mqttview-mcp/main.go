@@ -151,6 +151,24 @@ func newServer(client *Client, connectionID string) *mcp.Server {
 	}, t.namePoint)
 
 	mcp.AddTool(s, &mcp.Tool{
+		Name: "mqtt_collect",
+		Description: "Watch the broker for a number of seconds and return every message that arrived, with its " +
+			"topic, payload and timestamp. This is the tool for 'what does this device publish when I press the " +
+			"button' and 'what is on this broker at all': call it, ask the person to do the thing, and read what " +
+			"came back. Narrow it with an MQTT topic filter such as 'zigbee2mqtt/#' when the broker is busy. " +
+			"You need no broker address, password or certificate: mqttview already holds the connection. " +
+			"An empty result means nothing was published in the window, which is an answer, not a failure. " +
+			"If truncated is true the limit was reached and dropped says how many were not kept, so raise the " +
+			"limit or narrow the filter before drawing a conclusion.",
+	}, t.collect)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "mqtt_connections",
+		Description: "List the broker connections mqttview holds, with their IDs and whether each is currently " +
+			"connected. Use it when mqtt_collect reports more than one broker and you need to say which.",
+	}, t.connections)
+
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "plc_overview",
 		Description: "Summarise the PLC: how many points, lights and shades are known, the watchdog's alarm " +
 			"mode and stream ages, three-phase electricity readings and any M-Bus meters. Start here to find " +
@@ -604,4 +622,105 @@ func (t *tools) overview(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}
 		})
 	}
 	return nil, out, nil
+}
+
+// collectInput is the argument set for mqtt_collect.
+type collectInput struct {
+	Seconds      int    `json:"seconds,omitempty" jsonschema:"how long to watch, 1-120 seconds, default 10"`
+	Filter       string `json:"filter,omitempty" jsonschema:"MQTT topic filter to watch, such as 'zigbee2mqtt/#'; empty means everything"`
+	Limit        int    `json:"limit,omitempty" jsonschema:"most messages to return, 1-5000, default 500"`
+	ConnectionID string `json:"connection_id,omitempty" jsonschema:"which broker, when mqttview holds more than one; from mqtt_connections"`
+}
+
+// collectOutput is what the agent reads back.
+type collectOutput struct {
+	Filter   string             `json:"filter"`
+	Seconds  float64            `json:"seconds"`
+	Count    int                `json:"count"`
+	Messages []CollectedMessage `json:"messages"`
+	// Topics is the count per topic, which is usually the answer on its own:
+	// the point that moved when somebody pressed a button is the topic that
+	// appeared.
+	Topics map[string]int `json:"topics"`
+	// Dropped and Truncated are reported rather than implied. A caller that
+	// received exactly its limit cannot otherwise tell a complete answer from
+	// a cut-off one.
+	Dropped   int    `json:"dropped"`
+	Truncated bool   `json:"truncated"`
+	Note      string `json:"note,omitempty"`
+}
+
+func (t *tools) collect(ctx context.Context, _ *mcp.CallToolRequest, in collectInput) (*mcp.CallToolResult, collectOutput, error) {
+	connID, err := t.resolveConnection(ctx, in.ConnectionID)
+	if err != nil {
+		return nil, collectOutput{}, err
+	}
+
+	got, err := t.client.Collect(ctx, connID, in.Filter, in.Seconds, in.Limit)
+	if err != nil {
+		return nil, collectOutput{}, err
+	}
+
+	out := collectOutput{
+		Filter:    got.Filter,
+		Seconds:   got.Seconds,
+		Count:     len(got.Messages),
+		Messages:  got.Messages,
+		Topics:    got.Topics,
+		Dropped:   got.Dropped,
+		Truncated: got.Truncated,
+	}
+	// Said in words as well as in fields: an agent reading a count of zero
+	// tends to reach for a different tool rather than for a longer window.
+	if len(got.Messages) == 0 {
+		out.Note = "nothing was published on this filter during the window; this is an answer, not an error. " +
+			"Try a longer window, a wider filter, or ask the person to trigger the thing while it runs."
+	}
+	return nil, out, nil
+}
+
+// connectionsOutput lists the brokers mqttview holds.
+type connectionsOutput struct {
+	Connections []ConnectionSummary `json:"connections"`
+}
+
+func (t *tools) connections(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, connectionsOutput, error) {
+	list, err := t.client.Connections(ctx)
+	if err != nil {
+		return nil, connectionsOutput{}, err
+	}
+	return nil, connectionsOutput{Connections: list}, nil
+}
+
+// resolveConnection decides which broker a tool call is about.
+//
+// The common installation has exactly one, and making an agent name it every
+// time is friction for nothing. Where there is a choice, it is refused rather
+// than guessed: collecting from the wrong broker looks like a working call
+// that returns the wrong world.
+func (t *tools) resolveConnection(ctx context.Context, requested string) (string, error) {
+	if requested != "" {
+		return requested, nil
+	}
+	if t.connectionID != "" {
+		return t.connectionID, nil
+	}
+
+	list, err := t.client.Connections(ctx)
+	if err != nil {
+		return "", err
+	}
+	switch len(list) {
+	case 0:
+		return "", errors.New("mqttview has no broker connections configured")
+	case 1:
+		return list[0].ID, nil
+	default:
+		names := make([]string, 0, len(list))
+		for _, c := range list {
+			names = append(names, fmt.Sprintf("%s (%s)", c.Name, c.ID))
+		}
+		return "", fmt.Errorf("mqttview holds %d connections, so say which with connection_id: %s",
+			len(list), strings.Join(names, ", "))
+	}
 }
