@@ -22,20 +22,22 @@ import (
 	"github.com/dgprivate/mqttview/internal/logbuf"
 	"github.com/dgprivate/mqttview/internal/mqttc"
 	"github.com/dgprivate/mqttview/internal/plugin"
+	"github.com/dgprivate/mqttview/internal/recorder"
 	"github.com/dgprivate/mqttview/internal/store"
 )
 
 // Server holds every dependency the handlers need.
 type Server struct {
-	cfg     config.Config
-	log     *slog.Logger
-	db      *store.Store
-	auth    *auth.Service
-	mqtt    *mqttc.Manager
-	hub     *hub.Hub
-	plugins *plugin.Runtime
-	web     fs.FS
-	logs    *logbuf.Buffer
+	cfg      config.Config
+	log      *slog.Logger
+	db       *store.Store
+	auth     *auth.Service
+	mqtt     *mqttc.Manager
+	hub      *hub.Hub
+	plugins  *plugin.Runtime
+	web      fs.FS
+	logs     *logbuf.Buffer
+	recorder *recorder.Recorder
 
 	// leases counts the collection windows holding an ephemeral subscription,
 	// keyed by connection and filter, so two overlapping windows on the same
@@ -62,6 +64,9 @@ type Options struct {
 	// Logs is the in-memory ring behind the log view. Nil disables it, which
 	// is what a test that does not care about logs gets.
 	Logs *logbuf.Buffer
+	// Recorder writes messages to disk for the connections that want it. Nil
+	// means recording is not available in this build.
+	Recorder *recorder.Recorder
 }
 
 // New builds a Server.
@@ -71,17 +76,18 @@ func New(o Options) *Server {
 		log = slog.Default()
 	}
 	return &Server{
-		cfg:     o.Config,
-		log:     log,
-		db:      o.Store,
-		leases:  map[string]int{},
-		logs:    o.Logs,
-		auth:    o.Auth,
-		mqtt:    o.MQTT,
-		hub:     o.Hub,
-		plugins: o.Plugins,
-		web:     o.Web,
-		version: o.Version,
+		cfg:      o.Config,
+		log:      log,
+		db:       o.Store,
+		leases:   map[string]int{},
+		logs:     o.Logs,
+		recorder: o.Recorder,
+		auth:     o.Auth,
+		mqtt:     o.MQTT,
+		hub:      o.Hub,
+		plugins:  o.Plugins,
+		web:      o.Web,
+		version:  o.Version,
 	}
 }
 

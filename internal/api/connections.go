@@ -51,6 +51,12 @@ func (s *Server) mountConnections(r chi.Router) {
 			// The namespace as a picture rather than a list.
 			r.Get("/graph", s.handleGraph)
 
+			// What was written to disk, for the questions the in-memory
+			// history is too small to answer.
+			r.Get("/recordings", s.handleRecordings)
+			r.With(s.auth.RequireRole(store.RoleOperator)).
+				Delete("/recordings", s.handleDeleteRecordings)
+
 			// What the broker says about itself.
 			r.Get("/sys", s.handleBrokerStats)
 
@@ -102,6 +108,8 @@ type connectionView struct {
 	TopicLogEntries int                  `json:"topicLogEntries"`
 	TopicLogBudget  int64                `json:"topicLogBudget"`
 	SysStats        bool                 `json:"sysStats"`
+	RecordToDisk    bool                 `json:"recordToDisk"`
+	RecordKeep      int                  `json:"recordKeep"`
 	Status          mqttc.Status         `json:"status"`
 	Topics          int                  `json:"topics"`
 	TreeFull        bool                 `json:"treeFull"`
@@ -148,6 +156,8 @@ func viewOf(c *mqttc.Conn) connectionView {
 		TopicLogEntries: spec.TopicLogEntries,
 		TopicLogBudget:  spec.TopicLogBudget,
 		SysStats:        spec.SysStats,
+		RecordToDisk:    spec.RecordToDisk,
+		RecordKeep:      spec.RecordKeep,
 		Status:          c.Status(),
 		Topics:          topics,
 		TreeFull:        full,
@@ -174,6 +184,8 @@ type connectionRequest struct {
 	TopicLogEntries int                  `json:"topicLogEntries"`
 	TopicLogBudget  int64                `json:"topicLogBudget"`
 	SysStats        bool                 `json:"sysStats"`
+	RecordToDisk    bool                 `json:"recordToDisk"`
+	RecordKeep      int                  `json:"recordKeep"`
 }
 
 type tlsRequest struct {
@@ -211,6 +223,8 @@ func (req connectionRequest) toSpec(id string, prev *mqttc.ConnectionSpec) (mqtt
 		TopicLogEntries: req.TopicLogEntries,
 		TopicLogBudget:  req.TopicLogBudget,
 		SysStats:        req.SysStats,
+		RecordToDisk:    req.RecordToDisk,
+		RecordKeep:      req.RecordKeep,
 		TLS: mqttc.TLSSpec{
 			InsecureSkipVerify: req.TLS.InsecureSkipVerify,
 			ServerName:         req.TLS.ServerName,
@@ -298,6 +312,7 @@ func (s *Server) handleCreateConnection(w http.ResponseWriter, r *http.Request) 
 	defer cancel()
 
 	c, err := s.mqtt.Upsert(ctx, spec)
+	s.configureRecording(spec)
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -343,6 +358,7 @@ func (s *Server) handleUpdateConnection(w http.ResponseWriter, r *http.Request) 
 	defer cancel()
 
 	updated, err := s.mqtt.Upsert(ctx, spec)
+	s.configureRecording(spec)
 	if err != nil {
 		// The definition is saved; only re-establishing the session failed.
 		httpx.WriteErrorf(w, http.StatusBadGateway, "saved, but reconnecting failed: %s", err)
@@ -357,6 +373,12 @@ func (s *Server) handleDeleteConnection(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := opCtx(r, 15*time.Second)
 	defer cancel()
 
+	// A deleted connection stops recording. Its rows go with it through the
+	// foreign key, so this is only about not queueing writes for something
+	// that no longer exists.
+	if s.recorder != nil {
+		s.recorder.Configure(id, false, 0)
+	}
 	if err := s.mqtt.Remove(ctx, id); err != nil && !errors.Is(err, mqttc.ErrNotFound) {
 		s.log.Warn("disconnecting during delete failed", "id", id, "error", err)
 	}
@@ -622,4 +644,15 @@ func intParam(r *http.Request, name string, def int) int {
 		return def
 	}
 	return v
+}
+
+// configureRecording tells the recorder what a connection now wants. It is
+// called on every save rather than only when the flag changes: the retention
+// number can change on its own, and comparing before and after here would be
+// a second place that has to know what the spec contains.
+func (s *Server) configureRecording(spec mqttc.ConnectionSpec) {
+	if s.recorder == nil {
+		return
+	}
+	s.recorder.Configure(spec.ID, spec.RecordToDisk, spec.RecordKeep)
 }

@@ -262,6 +262,37 @@ CREATE TABLE audit_log (
 CREATE INDEX audit_log_at_idx ON audit_log(id DESC);
 `,
 	},
+	{
+		name: "0007_recording",
+		stmt: `
+-- Optional per-connection recording of every message to disk, for the
+-- questions the in-memory history is too small to answer: what did this
+-- device do overnight, and what changed between Tuesday and Thursday.
+--
+-- Off by default. It is the only feature here that makes the database grow
+-- with broker traffic rather than with configuration, so it is a choice
+-- somebody makes per connection rather than something that starts happening.
+ALTER TABLE connections ADD COLUMN record_to_disk INTEGER NOT NULL DEFAULT 0;
+-- 0 takes the default retention, so an existing install that turns recording
+-- on does not also have to pick a number before it works.
+ALTER TABLE connections ADD COLUMN record_keep INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE recorded_messages (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    connection_id TEXT NOT NULL REFERENCES connections(id) ON DELETE CASCADE,
+    topic         TEXT NOT NULL,
+    payload       BLOB NOT NULL,
+    qos           INTEGER NOT NULL DEFAULT 0,
+    retain        INTEGER NOT NULL DEFAULT 0,
+    received_at   TEXT NOT NULL
+);
+
+-- Topic first: the common read is one topic's history over a window, and the
+-- id tail gives that query its ordering without a second sort.
+CREATE INDEX recorded_messages_topic_idx ON recorded_messages(connection_id, topic, id DESC);
+CREATE INDEX recorded_messages_id_idx ON recorded_messages(connection_id, id DESC);
+`,
+	},
 }
 
 func (s *Store) migrate() error {

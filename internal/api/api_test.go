@@ -23,6 +23,7 @@ import (
 	"github.com/dgprivate/mqttview/internal/logbuf"
 	"github.com/dgprivate/mqttview/internal/mqttc"
 	"github.com/dgprivate/mqttview/internal/plugin"
+	"github.com/dgprivate/mqttview/internal/recorder"
 	"github.com/dgprivate/mqttview/internal/secrets"
 	"github.com/dgprivate/mqttview/internal/store"
 	"github.com/dgprivate/mqttview/internal/testutil"
@@ -97,6 +98,13 @@ func newTestServer(t *testing.T, mutate ...func(*config.Config)) *testServer {
 	h := hub.New(log, nil)
 	mgr.AddObserver(mqttc.Observer{OnMessage: h.BroadcastMessage, OnStatus: h.BroadcastStatus})
 
+	// A real recorder, so the recording path is exercised as it runs rather
+	// than as the nil fallback.
+	rec := recorder.New(db, log)
+	mgr.AddObserver(mqttc.Observer{OnMessage: rec.Observe})
+	rec.Start(newContext())
+	t.Cleanup(rec.Stop)
+
 	plugins := plugin.NewRuntime(db, mgr, log, h.BroadcastEvent)
 	if err := plugins.Start(newContext(), map[string]plugin.Defaults{}); err != nil {
 		t.Fatalf("start plugins: %v", err)
@@ -105,7 +113,7 @@ func newTestServer(t *testing.T, mutate ...func(*config.Config)) *testServer {
 
 	opts := api.Options{
 		Config: cfg, Log: log, Store: db, Auth: authSvc,
-		MQTT: mgr, Hub: h, Plugins: plugins, Version: "test", Logs: logs,
+		MQTT: mgr, Hub: h, Plugins: plugins, Version: "test", Logs: logs, Recorder: rec,
 		// A stand-in for the built frontend, so the SPA fallback is exercised
 		// and a redirect to /login lands somewhere rather than 404ing.
 		Web: testFrontend(),

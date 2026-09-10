@@ -122,6 +122,13 @@ type ConnectionSpec struct {
 	// broker that denies the namespace refuses the subscription.
 	SysStats bool `json:"sysStats,omitempty"`
 
+	// RecordToDisk writes every message this connection receives to the
+	// database, and RecordKeep caps how many rows are kept. Off by default:
+	// it is the one setting that makes the database grow with broker traffic
+	// rather than with configuration.
+	RecordToDisk bool `json:"recordToDisk,omitempty"`
+	RecordKeep   int  `json:"recordKeep,omitempty"`
+
 	// HistorySize caps the per-connection message ring buffer. 0 uses the
 	// package default.
 	HistorySize int `json:"historySize,omitempty"`

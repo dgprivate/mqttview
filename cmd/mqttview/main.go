@@ -24,6 +24,7 @@ import (
 	"github.com/dgprivate/mqttview/internal/logbuf"
 	"github.com/dgprivate/mqttview/internal/mqttc"
 	"github.com/dgprivate/mqttview/internal/plugin"
+	"github.com/dgprivate/mqttview/internal/recorder"
 	"github.com/dgprivate/mqttview/internal/secrets"
 	"github.com/dgprivate/mqttview/internal/store"
 	webui "github.com/dgprivate/mqttview/web"
@@ -158,6 +159,12 @@ func run() error {
 		OnStatus:  h.BroadcastStatus,
 	})
 
+	// Recording is a second observer rather than part of the first: the hub
+	// broadcast must not wait on a disk write, and the recorder's own observer
+	// does nothing but a channel send.
+	rec := recorder.New(db, log)
+	mgr.AddObserver(mqttc.Observer{OnMessage: rec.Observe})
+
 	plugins := plugin.NewRuntime(db, mgr, log, h.BroadcastEvent)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -174,6 +181,15 @@ func run() error {
 	}
 	defer plugins.Stop()
 
+	// Whatever the connections say once they are loaded, including the ones
+	// seeded from configuration.
+	for _, c := range mgr.List() {
+		spec := c.Spec()
+		rec.Configure(spec.ID, spec.RecordToDisk, spec.RecordKeep)
+	}
+	rec.Start(ctx)
+	defer rec.Stop()
+
 	mgr.StartAutoConnect(ctx)
 
 	webFS, err := webui.FS()
@@ -182,16 +198,17 @@ func run() error {
 	}
 
 	srv := api.New(api.Options{
-		Config:  cfg,
-		Log:     log,
-		Store:   db,
-		Auth:    authSvc,
-		MQTT:    mgr,
-		Hub:     h,
-		Plugins: plugins,
-		Web:     webFS,
-		Version: version,
-		Logs:    logs,
+		Config:   cfg,
+		Log:      log,
+		Store:    db,
+		Auth:     authSvc,
+		MQTT:     mgr,
+		Hub:      h,
+		Plugins:  plugins,
+		Web:      webFS,
+		Version:  version,
+		Logs:     logs,
+		Recorder: rec,
 	})
 
 	httpSrv := &http.Server{
