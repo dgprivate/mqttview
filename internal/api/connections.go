@@ -45,6 +45,8 @@ func (s *Server) mountConnections(r chi.Router) {
 			r.Get("/topic/series", s.handleTopicSeries)
 			r.Get("/topic/fields", s.handleTopicFields)
 			r.Get("/topic/export", s.handleTopicExport)
+			r.Get("/topic/decode", s.handleTopicDecode)
+			r.Get("/topic/raw", s.handleTopicRaw)
 
 			// What the broker says about itself.
 			r.Get("/sys", s.handleBrokerStats)

@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
 	"io"
@@ -442,5 +443,141 @@ func TestTheBrokerStatusPageNeedsASession(t *testing.T) {
 
 	if got := ts.status(http.MethodGet, "/api/connections/any/sys", nil); got != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", got)
+	}
+}
+
+func TestAPayloadIsClassifiedForTheViewer(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+	connID := subscribedBroker(t, ts)
+
+	publishAndWait(t, ts, connID, "kinds/json", `{"t":21.5}`, 1)
+	publishAndWait(t, ts, connID, "kinds/text", "21.5", 1)
+
+	for _, c := range []struct{ topic, want string }{
+		{"kinds/json", "json"},
+		{"kinds/text", "text"},
+	} {
+		var body struct {
+			Detected struct {
+				Kind string `json:"kind"`
+			} `json:"detected"`
+		}
+		ts.decode(ts.do(http.MethodGet, "/api/connections/"+connID+"/topic/decode?topic="+c.topic, nil),
+			http.StatusOK, &body)
+		if body.Detected.Kind != c.want {
+			t.Errorf("%s: kind = %q, want %q", c.topic, body.Detected.Kind, c.want)
+		}
+	}
+}
+
+func TestAnImagePayloadIsServedAsAnImage(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+	connID := subscribedBroker(t, ts)
+
+	// A PNG header, which is all the detection reads.
+	const pngBase64 = "iVBORw0KGgoAAAAA"
+	ts.decode(ts.do(http.MethodPost, "/api/connections/"+connID+"/publish", map[string]any{
+		"topic": "camera/snapshot", "payload": pngBase64, "payloadBase64": true,
+	}), http.StatusOK, nil)
+
+	testutil.WaitFor(t, 10*time.Second, "the image to arrive", func() bool {
+		return len(topicHistory(t, ts, connID, "camera/snapshot")) >= 1
+	})
+
+	resp := ts.do(http.MethodGet, "/api/connections/"+connID+"/topic/raw?topic=camera/snapshot", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "image/png" {
+		t.Errorf("Content-Type = %q, want image/png", got)
+	}
+}
+
+// The bytes came off a broker anybody on the network may be publishing to.
+// Echoing one back as a document the browser executes would turn any writable
+// topic into stored cross-site scripting.
+func TestAPayloadThatLooksLikeADocumentIsNeverServedAsOne(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+	connID := subscribedBroker(t, ts)
+
+	const svg = `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`
+	publishAndWait(t, ts, connID, "attack/svg", svg, 1)
+
+	resp := ts.do(http.MethodGet, "/api/connections/"+connID+"/topic/raw?topic=attack/svg", nil)
+	defer resp.Body.Close()
+
+	if got := resp.Header.Get("Content-Type"); got != "application/octet-stream" {
+		t.Errorf("Content-Type = %q; a browser could execute that", got)
+	}
+	if cd := resp.Header.Get("Content-Disposition"); !strings.HasPrefix(cd, "attachment;") {
+		t.Errorf("Content-Disposition = %q, want it offered as a download", cd)
+	}
+	if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+}
+
+func TestASparkplugTopicIsDecodedRatherThanShownAsBinary(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+	connID := subscribedBroker(t, ts)
+
+	// One metric: name "temperature", datatype Int32 (3), int_value 21.
+	// Built here rather than pasted, so the bytes are traceable to the schema.
+	//   field 2 (metrics), length-delimited
+	//     field 1 (name) "temperature"
+	//     field 4 (datatype) 3
+	//     field 10 (int_value) 21
+	metric := []byte{0x0a, 0x0b}
+	metric = append(metric, []byte("temperature")...)
+	metric = append(metric, 0x20, 0x03, 0x50, 0x15)
+	body := append([]byte{0x12, byte(len(metric))}, metric...)
+
+	ts.decode(ts.do(http.MethodPost, "/api/connections/"+connID+"/publish", map[string]any{
+		"topic": "spBv1.0/plant/NDATA/edge1", "payload": base64.StdEncoding.EncodeToString(body),
+		"payloadBase64": true,
+	}), http.StatusOK, nil)
+
+	testutil.WaitFor(t, 10*time.Second, "the Sparkplug payload to arrive", func() bool {
+		return len(topicHistory(t, ts, connID, "spBv1.0/plant/NDATA/edge1")) >= 1
+	})
+
+	var body2 struct {
+		Detected struct {
+			Kind string `json:"kind"`
+		} `json:"detected"`
+		SparkplugTopic struct {
+			Group       string `json:"group"`
+			MessageType string `json:"messageType"`
+			EdgeNode    string `json:"edgeNode"`
+		} `json:"sparkplugTopic"`
+		Sparkplug struct {
+			Metrics []struct {
+				Name     string `json:"name"`
+				Value    string `json:"value"`
+				DataType string `json:"dataType"`
+			} `json:"metrics"`
+		} `json:"sparkplug"`
+	}
+	ts.decode(ts.do(http.MethodGet,
+		"/api/connections/"+connID+"/topic/decode?topic=spBv1.0/plant/NDATA/edge1", nil),
+		http.StatusOK, &body2)
+
+	if body2.Detected.Kind != "sparkplug" {
+		t.Fatalf("kind = %q, want sparkplug", body2.Detected.Kind)
+	}
+	if body2.SparkplugTopic.MessageType != "NDATA" || body2.SparkplugTopic.EdgeNode != "edge1" {
+		t.Errorf("topic parsed as %+v", body2.SparkplugTopic)
+	}
+	if len(body2.Sparkplug.Metrics) != 1 {
+		t.Fatalf("got %d metrics, want 1", len(body2.Sparkplug.Metrics))
+	}
+	m := body2.Sparkplug.Metrics[0]
+	if m.Name != "temperature" || m.Value != "21" || m.DataType != "Int32" {
+		t.Errorf("metric = %+v, want temperature/21/Int32", m)
 	}
 }

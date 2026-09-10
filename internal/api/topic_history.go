@@ -15,6 +15,7 @@ import (
 
 	"github.com/dgprivate/mqttview/internal/httpx"
 	"github.com/dgprivate/mqttview/internal/mqttc"
+	"github.com/dgprivate/mqttview/internal/payload"
 )
 
 // historyEntry is one message as the timeline renders it. The payload is sent
@@ -429,4 +430,87 @@ func (s *Server) handleBrokerStats(w http.ResponseWriter, r *http.Request) {
 		"connected": c.Status().State == mqttc.StateConnected,
 		"stats":     stats,
 	})
+}
+
+// handleTopicDecode says what a topic's last payload appears to be, and for
+// the encodings mqttview understands, what it says.
+//
+// The classification is here rather than in the browser because two of the
+// three decisions need bytes the browser is not given: the payload reaches it
+// as text or base64, and a Sparkplug metric is a protobuf field number away
+// from being confident nonsense.
+func (s *Server) handleTopicDecode(w http.ResponseWriter, r *http.Request) {
+	c, ok := s.conn(w, r)
+	if !ok {
+		return
+	}
+	topic, ok := requireTopic(w, r)
+	if !ok {
+		return
+	}
+
+	value, found := c.Tree().Value(topic)
+	if !found {
+		httpx.WriteErrorf(w, http.StatusNotFound, "no data for topic %q", topic)
+		return
+	}
+
+	detected := payload.Detect(topic, value.Payload)
+	resp := map[string]any{
+		"topic":     topic,
+		"detected":  detected,
+		"truncated": value.Truncated,
+	}
+
+	if detected.Kind == payload.KindSparkplug {
+		if parsed, ok := payload.ParseSparkplugTopic(topic); ok {
+			resp["sparkplugTopic"] = parsed
+		}
+		decoded, err := payload.DecodeSparkplug(value.Payload)
+		if err != nil {
+			// Not an error response. A payload under the namespace that will
+			// not decode is worth saying plainly, and the raw bytes are still
+			// there to look at.
+			resp["sparkplugError"] = err.Error()
+		} else {
+			resp["sparkplug"] = decoded
+		}
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, resp)
+}
+
+// handleTopicRaw echoes a topic's last payload as bytes, so an image payload
+// can be an <img> source rather than a base64 blob in a JSON document.
+//
+// The media type comes from payload.SafeMediaType, which answers with one of a
+// handful of image types or application/octet-stream and never anything a
+// browser will execute. These bytes came off a broker that anybody on the
+// network may be publishing to.
+func (s *Server) handleTopicRaw(w http.ResponseWriter, r *http.Request) {
+	c, ok := s.conn(w, r)
+	if !ok {
+		return
+	}
+	topic, ok := requireTopic(w, r)
+	if !ok {
+		return
+	}
+
+	value, found := c.Tree().Value(topic)
+	if !found {
+		httpx.WriteErrorf(w, http.StatusNotFound, "no data for topic %q", topic)
+		return
+	}
+
+	mediaType := payload.SafeMediaType(value.Payload)
+	w.Header().Set("Content-Type", mediaType)
+	// Belt and braces alongside the global nosniff: anything that is not a
+	// recognised image is offered as a download rather than rendered.
+	if mediaType == "application/octet-stream" {
+		w.Header().Set("Content-Disposition",
+			"attachment; filename="+strconv.Quote(exportFilename(topic, "bin")))
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(value.Payload)
 }
