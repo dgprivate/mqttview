@@ -280,8 +280,8 @@ Every release carries binaries for Linux, macOS and Windows on
 there is nothing else to install.
 
 ```bash
-tar xzf mqttview_0.1.0_linux_amd64.tar.gz
-./mqttview_0.1.0_linux_amd64/mqttview -addr 127.0.0.1:8114
+tar xzf mqttview_0.3.0_linux_amd64.tar.gz
+./mqttview_0.3.0_linux_amd64/mqttview -addr 127.0.0.1:8114
 ```
 
 `SHA256SUMS` is signed with cosign, keyless, by the workflow that built it:
