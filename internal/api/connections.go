@@ -10,7 +10,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/dgprivate/mqttview/internal/auth"
 	"github.com/dgprivate/mqttview/internal/httpx"
 	"github.com/dgprivate/mqttview/internal/mqttc"
 	"github.com/dgprivate/mqttview/internal/store"
@@ -49,6 +48,19 @@ func (s *Server) mountConnections(r chi.Router) {
 
 			// What the broker says about itself.
 			r.Get("/sys", s.handleBrokerStats)
+
+			// What has been sent, and what somebody chose to keep.
+			r.Get("/publishes", s.handlePublishHistory)
+			r.With(s.auth.RequireRole(store.RoleOperator)).Delete("/publishes", s.handleClearPublishHistory)
+			r.With(s.auth.RequireRole(store.RoleOperator)).
+				Post("/publishes/{publishID}/republish", s.handleRepublish)
+
+			r.Get("/saved", s.handleListSaved)
+			r.With(s.auth.RequireRole(store.RoleOperator)).Post("/saved", s.handleCreateSaved)
+			r.With(s.auth.RequireRole(store.RoleOperator)).Put("/saved/{savedID}", s.handleUpdateSaved)
+			r.With(s.auth.RequireRole(store.RoleOperator)).Delete("/saved/{savedID}", s.handleDeleteSaved)
+			r.With(s.auth.RequireRole(store.RoleOperator)).
+				Post("/saved/{savedID}/publish", s.handlePublishSaved)
 		})
 	})
 }
@@ -410,24 +422,13 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		payload = decoded
 	}
 
-	ctx, cancel := opCtx(r, 20*time.Second)
-	defer cancel()
-
-	if err := c.Publish(ctx, mqttc.PublishRequest{
+	s.publishAndRecord(w, r, c, mqttc.PublishRequest{
 		Topic:   req.Topic,
 		Payload: payload,
 		QoS:     req.QoS,
 		Retain:  req.Retain,
 		Props:   req.Props,
-	}); err != nil {
-		httpx.WriteError(w, http.StatusBadGateway, err.Error())
-		return
-	}
-
-	user, _ := auth.UserFrom(r.Context())
-	s.log.Info("publish", "user", user.Email, "connection", c.Spec().Name,
-		"topic", req.Topic, "qos", req.QoS, "retain", req.Retain, "bytes", len(payload))
-	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}, "publish")
 }
 
 type subscribeRequest struct {

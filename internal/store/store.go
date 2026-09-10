@@ -195,6 +195,51 @@ ALTER TABLE connections ADD COLUMN topic_log_budget INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE connections ADD COLUMN sys_stats INTEGER NOT NULL DEFAULT 0;
 `,
 	},
+	{
+		name: "0005_publishing",
+		stmt: `
+-- What has been published, so it can be found again and sent again. An
+-- INTEGER PRIMARY KEY rather than a UUID because this table is pruned by age
+-- and rowid order is the age order, without a second index to maintain.
+--
+-- The payload is a BLOB: a published payload is bytes, and half of them are
+-- not text. Storing it as TEXT would corrupt exactly the binary payloads
+-- somebody most wants to send again.
+CREATE TABLE publish_history (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    connection_id TEXT NOT NULL REFERENCES connections(id) ON DELETE CASCADE,
+    user_id       TEXT,
+    username      TEXT NOT NULL DEFAULT '',
+    topic         TEXT NOT NULL,
+    payload       BLOB NOT NULL,
+    qos           INTEGER NOT NULL DEFAULT 0,
+    retain        INTEGER NOT NULL DEFAULT 0,
+    published_at  TEXT NOT NULL
+);
+
+CREATE INDEX publish_history_conn_idx ON publish_history(connection_id, id DESC);
+
+-- Messages somebody chose to keep, as opposed to ones that merely happened.
+-- connection_id NULL means the message is not tied to one broker, which is
+-- what makes a collection usable against staging and then against production.
+CREATE TABLE saved_messages (
+    id            TEXT PRIMARY KEY,
+    connection_id TEXT REFERENCES connections(id) ON DELETE CASCADE,
+    folder        TEXT NOT NULL DEFAULT '',
+    name          TEXT NOT NULL,
+    topic         TEXT NOT NULL,
+    payload       BLOB NOT NULL,
+    qos           INTEGER NOT NULL DEFAULT 0,
+    retain        INTEGER NOT NULL DEFAULT 0,
+    sort_order    INTEGER NOT NULL DEFAULT 0,
+    created_by    TEXT,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+
+CREATE INDEX saved_messages_scope_idx ON saved_messages(connection_id, folder, sort_order);
+`,
+	},
 }
 
 func (s *Store) migrate() error {
