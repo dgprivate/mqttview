@@ -21,7 +21,7 @@ type ConnectionRecord struct {
 const connectionColumns = `id, name, url, version, client_id, username, password_enc,
     keep_alive, clean_start, session_expiry, connect_timeout, tls_json, will_json,
     subscriptions_json, auto_connect, history_size, topic_log_entries, topic_log_budget,
-    created_by, created_at, updated_at`
+    sys_stats, created_by, created_at, updated_at`
 
 // SaveConnection inserts or replaces a connection definition. The broker
 // password and the TLS settings are encrypted before they are written.
@@ -71,7 +71,7 @@ func (s *Store) SaveConnection(rec ConnectionRecord) error {
 
 	_, err = s.db.Exec(
 		`INSERT INTO connections (`+connectionColumns+`)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             url = excluded.url,
@@ -90,11 +90,12 @@ func (s *Store) SaveConnection(rec ConnectionRecord) error {
             history_size = excluded.history_size,
             topic_log_entries = excluded.topic_log_entries,
             topic_log_budget = excluded.topic_log_budget,
+            sys_stats = excluded.sys_stats,
             updated_at = excluded.updated_at`,
 		spec.ID, spec.Name, spec.URL, int(spec.Version), spec.ClientID, spec.Username, passwordEnc,
 		spec.KeepAlive, boolToInt(spec.CleanStart), spec.SessionExpiry, spec.ConnectTimeout,
 		tlsJSON, willJSON, string(subsJSON), boolToInt(spec.AutoConnect), spec.HistorySize,
-		spec.TopicLogEntries, spec.TopicLogBudget,
+		spec.TopicLogEntries, spec.TopicLogBudget, boolToInt(spec.SysStats),
 		nullIfEmpty(rec.CreatedBy), rec.CreatedAt.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("store: save connection: %w", err)
@@ -142,6 +143,7 @@ func (s *Store) scanConnection(row rowScanner) (ConnectionRecord, error) {
 		version    int
 		cleanStart int
 		autoConn   int
+		sysStats   int
 		passwordEn string
 		tlsJSON    string
 		willJSON   sql.NullString
@@ -153,7 +155,7 @@ func (s *Store) scanConnection(row rowScanner) (ConnectionRecord, error) {
 	err := row.Scan(&spec.ID, &spec.Name, &spec.URL, &version, &spec.ClientID, &spec.Username,
 		&passwordEn, &spec.KeepAlive, &cleanStart, &spec.SessionExpiry, &spec.ConnectTimeout,
 		&tlsJSON, &willJSON, &subsJSON, &autoConn, &spec.HistorySize,
-		&spec.TopicLogEntries, &spec.TopicLogBudget,
+		&spec.TopicLogEntries, &spec.TopicLogBudget, &sysStats,
 		&createdBy, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ConnectionRecord{}, ErrNotFound
@@ -165,6 +167,7 @@ func (s *Store) scanConnection(row rowScanner) (ConnectionRecord, error) {
 	spec.Version = mqttc.Version(version)
 	spec.CleanStart = cleanStart != 0
 	spec.AutoConnect = autoConn != 0
+	spec.SysStats = sysStats != 0
 
 	if spec.Password, err = s.box.Open(passwordEn); err != nil {
 		// A key rotation should not make every connection unreadable; report

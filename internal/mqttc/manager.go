@@ -429,15 +429,7 @@ func (c *Conn) connect(ctx context.Context) error {
 	// a test look flaky. Connect returning nil means connected.
 	c.setState(StateConnected, nil)
 
-	c.mu.RLock()
-	subs := make([]Subscription, 0, len(spec.Subscriptions)+len(c.ephemeral))
-	subs = append(subs, spec.Subscriptions...)
-	for _, s := range c.ephemeral {
-		subs = append(subs, s)
-	}
-	c.mu.RUnlock()
-
-	if err := client.Subscribe(ctx, subs); err != nil {
+	if err := client.Subscribe(ctx, c.wantedSubscriptions()); err != nil {
 		c.mgr.log.Warn("initial subscribe failed", "connection", spec.ID, "error", err)
 	}
 	return nil
@@ -577,16 +569,61 @@ func (c *Conn) Unsubscribe(ctx context.Context, filters []string) error {
 func (c *Conn) syncSubscriptions(ctx context.Context) error {
 	c.mu.RLock()
 	client := c.client
-	subs := append([]Subscription(nil), c.spec.Subscriptions...)
-	for _, s := range c.ephemeral {
-		subs = append(subs, s)
-	}
 	c.mu.RUnlock()
 
 	if client == nil {
 		return nil
 	}
-	return client.Subscribe(ctx, subs)
+	// Subscribe only adds. Turning the broker statistics off has to say so to
+	// the broker as well, or $SYS keeps arriving until the next reconnect and
+	// the page that was switched off carries on filling the topic tree.
+	if !c.wantsSys() {
+		if err := client.Unsubscribe(ctx, []string{SysFilter}); err != nil {
+			c.mgr.log.Debug("dropping the $SYS subscription failed",
+				"connection", c.spec.ID, "error", err)
+		}
+	}
+	return client.Subscribe(ctx, c.wantedSubscriptions())
+}
+
+// wantsSys reports whether $SYS should be held open. A user who subscribed to
+// it themselves keeps it whatever the toggle says: it is their subscription,
+// and the statistics page is not the only reason to want the namespace.
+func (c *Conn) wantsSys() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.spec.SysStats {
+		return true
+	}
+	for _, s := range c.spec.Subscriptions {
+		if s.Filter == SysFilter {
+			return true
+		}
+	}
+	return false
+}
+
+// wantedSubscriptions is the whole set a connected client should hold: the
+// user's own, whatever the plugins added, and $SYS when the broker's
+// statistics are wanted. One function rather than two identical blocks,
+// because the two used to drift — the reconnect path forgot a subscription
+// the connect path had.
+func (c *Conn) wantedSubscriptions() []Subscription {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	subs := make([]Subscription, 0, len(c.spec.Subscriptions)+len(c.ephemeral)+1)
+	subs = append(subs, c.spec.Subscriptions...)
+	for _, s := range c.ephemeral {
+		subs = append(subs, s)
+	}
+	if c.spec.SysStats {
+		// QoS 0: these are periodic gauges, and a broker republishes them
+		// every few seconds. Redelivering a stale one helps nobody.
+		subs = append(subs, Subscription{Filter: SysFilter, QoS: 0})
+	}
+	return subs
 }
 
 // Publish sends a message and echoes it into the local view, so the UI shows

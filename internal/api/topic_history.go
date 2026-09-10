@@ -410,3 +410,23 @@ func numericValue(v any) (float64, bool) {
 	}
 	return 0, false
 }
+
+// handleBrokerStats returns what the broker publishes about itself under $SYS.
+//
+// It reports whether the namespace is being collected at all as well as what
+// arrived, because "this broker has no clients" and "this broker will not say"
+// are different facts and a page of zeroes cannot tell them apart. A broker
+// may publish nothing there, or deny the reserved namespace outright.
+func (s *Server) handleBrokerStats(w http.ResponseWriter, r *http.Request) {
+	c, ok := s.conn(w, r)
+	if !ok {
+		return
+	}
+
+	stats := c.BrokerStats()
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"enabled":   c.Spec().SysStats,
+		"connected": c.Status().State == mqttc.StateConnected,
+		"stats":     stats,
+	})
+}

@@ -46,6 +46,9 @@ func (s *Server) mountConnections(r chi.Router) {
 			r.Get("/topic/series", s.handleTopicSeries)
 			r.Get("/topic/fields", s.handleTopicFields)
 			r.Get("/topic/export", s.handleTopicExport)
+
+			// What the broker says about itself.
+			r.Get("/sys", s.handleBrokerStats)
 		})
 	})
 }
@@ -72,6 +75,7 @@ type connectionView struct {
 	HistorySize     int                  `json:"historySize"`
 	TopicLogEntries int                  `json:"topicLogEntries"`
 	TopicLogBudget  int64                `json:"topicLogBudget"`
+	SysStats        bool                 `json:"sysStats"`
 	Status          mqttc.Status         `json:"status"`
 	Topics          int                  `json:"topics"`
 	TreeFull        bool                 `json:"treeFull"`
@@ -117,6 +121,7 @@ func viewOf(c *mqttc.Conn) connectionView {
 		HistorySize:     spec.HistorySize,
 		TopicLogEntries: spec.TopicLogEntries,
 		TopicLogBudget:  spec.TopicLogBudget,
+		SysStats:        spec.SysStats,
 		Status:          c.Status(),
 		Topics:          topics,
 		TreeFull:        full,
@@ -142,6 +147,7 @@ type connectionRequest struct {
 	HistorySize     int                  `json:"historySize"`
 	TopicLogEntries int                  `json:"topicLogEntries"`
 	TopicLogBudget  int64                `json:"topicLogBudget"`
+	SysStats        bool                 `json:"sysStats"`
 }
 
 type tlsRequest struct {
@@ -178,6 +184,7 @@ func (req connectionRequest) toSpec(id string, prev *mqttc.ConnectionSpec) (mqtt
 		HistorySize:     req.HistorySize,
 		TopicLogEntries: req.TopicLogEntries,
 		TopicLogBudget:  req.TopicLogBudget,
+		SysStats:        req.SysStats,
 		TLS: mqttc.TLSSpec{
 			InsecureSkipVerify: req.TLS.InsecureSkipVerify,
 			ServerName:         req.TLS.ServerName,

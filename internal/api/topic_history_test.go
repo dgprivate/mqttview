@@ -375,3 +375,72 @@ func TestTopicHistoryNeedsASession(t *testing.T) {
 		}
 	}
 }
+
+// "This broker has no clients" and "this broker will not say" are different
+// facts, and a page of zeroes cannot tell them apart. The endpoint reports
+// which one it is.
+func TestTheBrokerStatusPageSaysWhenItIsCollectingNothing(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+	connID := subscribedBroker(t, ts)
+
+	var body struct {
+		Enabled   bool `json:"enabled"`
+		Connected bool `json:"connected"`
+		Stats     struct {
+			Available bool `json:"available"`
+			Clients   struct {
+				Connected *int64 `json:"connected"`
+			} `json:"clients"`
+		} `json:"stats"`
+	}
+	ts.decode(ts.do(http.MethodGet, "/api/connections/"+connID+"/sys", nil), http.StatusOK, &body)
+
+	if body.Enabled {
+		t.Error("broker statistics are on for a connection that never asked for them")
+	}
+	if body.Stats.Available {
+		t.Error("statistics are reported as available with no subscription held")
+	}
+	if body.Stats.Clients.Connected != nil {
+		t.Errorf("a client count of %d was reported without collecting anything",
+			*body.Stats.Clients.Connected)
+	}
+	if !body.Connected {
+		t.Error("the connection is live but the page says otherwise")
+	}
+}
+
+func TestTurningTheBrokerStatisticsOnIsRememberedOnTheConnection(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+	connID := subscribedBroker(t, ts)
+
+	var conn struct {
+		Name    string `json:"name"`
+		URL     string `json:"url"`
+		Version string `json:"version"`
+	}
+	ts.decode(ts.do(http.MethodGet, "/api/connections/"+connID, nil), http.StatusOK, &conn)
+
+	ts.decode(ts.do(http.MethodPut, "/api/connections/"+connID, map[string]any{
+		"name": conn.Name, "url": conn.URL, "version": conn.Version,
+		"sysStats": true,
+	}), http.StatusOK, nil)
+
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	ts.decode(ts.do(http.MethodGet, "/api/connections/"+connID+"/sys", nil), http.StatusOK, &body)
+	if !body.Enabled {
+		t.Error("the setting did not survive being written to the connection")
+	}
+}
+
+func TestTheBrokerStatusPageNeedsASession(t *testing.T) {
+	ts := newTestServer(t)
+
+	if got := ts.status(http.MethodGet, "/api/connections/any/sys", nil); got != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", got)
+	}
+}

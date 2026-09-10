@@ -117,6 +117,11 @@ type ConnectionSpec struct {
 	Subscriptions []Subscription `json:"subscriptions"`
 	AutoConnect   bool           `json:"autoConnect"`
 
+	// SysStats subscribes to $SYS/# so the broker's own statistics can be
+	// shown. Off by default: it is extra traffic on every connection, and a
+	// broker that denies the namespace refuses the subscription.
+	SysStats bool `json:"sysStats,omitempty"`
+
 	// HistorySize caps the per-connection message ring buffer. 0 uses the
 	// package default.
 	HistorySize int `json:"historySize,omitempty"`

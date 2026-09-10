@@ -185,6 +185,16 @@ ALTER TABLE connections ADD COLUMN topic_log_entries INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE connections ADD COLUMN topic_log_budget INTEGER NOT NULL DEFAULT 0;
 `,
 	},
+	{
+		name: "0004_broker_stats",
+		stmt: `
+-- Whether to hold a $SYS subscription open for this connection. Off by
+-- default, and deliberately so: it is traffic on every connection that has
+-- it, and a broker configured to deny the reserved namespace refuses the
+-- subscription rather than ignoring it.
+ALTER TABLE connections ADD COLUMN sys_stats INTEGER NOT NULL DEFAULT 0;
+`,
+	},
 }
 
 func (s *Store) migrate() error {
