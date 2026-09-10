@@ -53,6 +53,11 @@ func (s *Server) mountConnections(r chi.Router) {
 			// that hold no broker credentials of their own.
 			r.Get("/collect", s.handleCollect)
 
+			// Destructive, and not undoable: the broker forgets the value for
+			// every client that connects afterwards.
+			r.With(s.auth.RequireRole(store.RoleOperator)).
+				Post("/retained/clear", s.handleClearRetained)
+
 			// What has been sent, and what somebody chose to keep.
 			r.Get("/publishes", s.handlePublishHistory)
 			r.With(s.auth.RequireRole(store.RoleOperator)).Delete("/publishes", s.handleClearPublishHistory)

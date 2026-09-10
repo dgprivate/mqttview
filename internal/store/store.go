@@ -240,6 +240,28 @@ CREATE TABLE saved_messages (
 CREATE INDEX saved_messages_scope_idx ON saved_messages(connection_id, folder, sort_order);
 `,
 	},
+	{
+		name: "0006_audit_log",
+		stmt: `
+-- Actions that change something outside mqttview, with who did them.
+--
+-- The username is copied in rather than joined at read time: an account can
+-- be deleted, and "somebody who no longer exists cleared this" is a worse
+-- answer than the address that did it. user_id is kept beside it for the
+-- cases where the account is still there.
+CREATE TABLE audit_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    at         TEXT NOT NULL,
+    user_id    TEXT,
+    username   TEXT NOT NULL DEFAULT '',
+    action     TEXT NOT NULL,
+    target     TEXT NOT NULL DEFAULT '',
+    detail     TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX audit_log_at_idx ON audit_log(id DESC);
+`,
+	},
 }
 
 func (s *Store) migrate() error {

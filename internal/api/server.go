@@ -161,6 +161,10 @@ func (s *Server) Handler() http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(csrf)
 				s.mountConnections(r)
+
+				// What has been done to the world outside mqttview. Admin
+				// only: it names accounts and their actions.
+				r.With(s.auth.RequireRole(store.RoleAdmin)).Get("/audit", s.handleAuditLog)
 				s.mountUsers(r)
 				s.mountPlugins(r)
 
