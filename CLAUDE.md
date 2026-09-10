@@ -32,10 +32,15 @@ gofmt -l ./cmd ./internal        # must print nothing
 go vet ./...
 go test -race ./...
 golangci-lint run                # config in .golangci.yml
-cd web && npx tsc --noEmit && npm run build
+cd web && npx tsc -b --force && npm run build && npm run lint
 ```
 
 `make build` produces the binary with the frontend baked in.
+
+`tsc -b`, not `tsc --noEmit`. The root `tsconfig.json` is a solution file —
+`"files": []` and two project references — so `--noEmit` type-checks nothing at
+all and exits 0 on code that does not compile. It was in this list for a while
+and passed happily over an undeclared prop.
 
 **Never report work as finished without running the tests.** If they fail, say
 so and show the output. A summary that says "should work" is worth less than

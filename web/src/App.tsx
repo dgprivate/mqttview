@@ -7,13 +7,17 @@ import type { PluginInfo } from './api/types'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { Spinner } from './components/common'
 import { Account } from './pages/Account'
+import { BrokerStatus } from './pages/BrokerStatus'
 import { BeckhoffPlc } from './pages/BeckhoffPlc'
 import { ConnectionForm } from './pages/ConnectionForm'
 import { Connections } from './pages/Connections'
 import { Explorer } from './pages/Explorer'
 import { HomeAssistant } from './pages/HomeAssistant'
 import { Login } from './pages/Login'
+import { Logs } from './pages/Logs'
 import { Plugins } from './pages/Plugins'
+import { Recordings } from './pages/Recordings'
+import { TopicGraph } from './pages/TopicGraph'
 import { Users } from './pages/Users'
 
 export default function App() {
@@ -48,10 +52,14 @@ function Shell() {
           <Route path="/connections/new" element={<ConnectionForm />} />
           <Route path="/connections/:id" element={<Explorer />} />
           <Route path="/connections/:id/edit" element={<ConnectionForm />} />
+          <Route path="/connections/:id/status" element={<BrokerStatus />} />
+          <Route path="/connections/:id/graph" element={<TopicGraph />} />
+          <Route path="/connections/:id/recordings" element={<Recordings />} />
           <Route path="/plugins" element={<Plugins />} />
           <Route path="/home-assistant" element={<HomeAssistant />} />
           <Route path="/beckhoff-plc" element={<BeckhoffPlc />} />
           <Route path="/users" element={<Users />} />
+          <Route path="/logs" element={<Logs />} />
           <Route path="/account" element={<Account />} />
           <Route path="*" element={<Navigate to="/connections" replace />} />
         </Routes>
@@ -172,6 +180,7 @@ function Navigation() {
         {plcEnabled && <NavLink to="/beckhoff-plc">PLC</NavLink>}
         <NavLink to="/plugins">Plugins</NavLink>
         {can('admin') && <NavLink to="/users">Users</NavLink>}
+        {can('admin') && <NavLink to="/logs">Logs</NavLink>}
         <NavLink to="/account">{user?.name || user?.email}</NavLink>
         {/* Signing out of mqttview would do nothing in Home Assistant mode:
             the next request arrives authenticated again. Offering the link

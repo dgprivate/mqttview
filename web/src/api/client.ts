@@ -1,6 +1,9 @@
 import { apiURL } from './base'
 import type {
+  AuditEntry,
   AuthConfig,
+  BrokerStatsResponse,
+  Collection,
   Health,
   Connection,
   ConnectionInput,
@@ -13,10 +16,20 @@ import type {
   PlcState,
   PlcStatus,
   PluginInfo,
+  PublishRecord,
+  RecordingsResponse,
   Role,
+  SavedMessage,
+  SavedMessageInput,
   TwoFactorStatus,
+  TopicDecode,
+  TopicDiff,
+  TopicGraph,
+  TopicHistory,
+  TopicSeries,
   TopicValue,
   TreeNode,
+  LogPage,
   User,
 } from './types'
 
@@ -195,6 +208,104 @@ export const api = {
     ),
   search: (id: string, q: string) =>
     request<TopicValue[]>(`/api/connections/${id}/search?q=${encodeURIComponent(q)}`),
+
+  // --- one topic's own past ---
+  topicHistory: (id: string, topic: string, limit = 0) =>
+    request<TopicHistory>(
+      `/api/connections/${id}/topic/history?topic=${encodeURIComponent(topic)}&limit=${limit}`,
+    ),
+  topicDiff: (id: string, topic: string) =>
+    request<TopicDiff>(`/api/connections/${id}/topic/diff?topic=${encodeURIComponent(topic)}`),
+  topicFields: (id: string, topic: string) =>
+    request<{ topic: string; fields: string[] }>(
+      `/api/connections/${id}/topic/fields?topic=${encodeURIComponent(topic)}`,
+    ),
+  topicSeries: (id: string, topic: string, field: string, since = '') =>
+    request<TopicSeries>(
+      `/api/connections/${id}/topic/series?topic=${encodeURIComponent(topic)}` +
+        `&field=${encodeURIComponent(field)}${since ? `&since=${since}` : ''}`,
+    ),
+  topicDecode: (id: string, topic: string) =>
+    request<TopicDecode>(`/api/connections/${id}/topic/decode?topic=${encodeURIComponent(topic)}`),
+
+  /**
+   * topicExportURL and topicRawURL are addresses rather than fetches.
+   *
+   * The browser has to do the fetching itself for both: one becomes an <img>
+   * source and the other a download, and routing either through fetch would
+   * mean holding the bytes in memory to hand straight back to the browser.
+   */
+  topicExportURL: (id: string, topic: string, format: 'csv' | 'json') =>
+    apiURL(
+      `/api/connections/${id}/topic/export?topic=${encodeURIComponent(topic)}&format=${format}`,
+    ),
+  topicRawURL: (id: string, topic: string) =>
+    apiURL(`/api/connections/${id}/topic/raw?topic=${encodeURIComponent(topic)}`),
+
+  // --- what the broker says about itself ---
+  brokerStats: (id: string) => request<BrokerStatsResponse>(`/api/connections/${id}/sys`),
+
+  // --- watching for a window ---
+  collect: (id: string, seconds: number, filter = '', limit = 0) =>
+    request<Collection>(
+      `/api/connections/${id}/collect?seconds=${seconds}` +
+        `&filter=${encodeURIComponent(filter)}${limit ? `&limit=${limit}` : ''}`,
+    ),
+
+  // --- what has been sent, and what was kept ---
+  publishHistory: (id: string, q = '', limit = 100) =>
+    request<PublishRecord[]>(
+      `/api/connections/${id}/publishes?q=${encodeURIComponent(q)}&limit=${limit}`,
+    ),
+  clearPublishHistory: (id: string) =>
+    request<void>(`/api/connections/${id}/publishes`, { method: 'DELETE' }),
+  republish: (id: string, publishId: number) =>
+    request<void>(`/api/connections/${id}/publishes/${publishId}/republish`, { method: 'POST' }),
+
+  savedMessages: (id: string) => request<SavedMessage[]>(`/api/connections/${id}/saved`),
+  createSaved: (id: string, body: SavedMessageInput) =>
+    request<SavedMessage>(`/api/connections/${id}/saved`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateSaved: (id: string, savedId: string, body: SavedMessageInput) =>
+    request<SavedMessage>(`/api/connections/${id}/saved/${savedId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  deleteSaved: (id: string, savedId: string) =>
+    request<void>(`/api/connections/${id}/saved/${savedId}`, { method: 'DELETE' }),
+  publishSaved: (id: string, savedId: string) =>
+    request<void>(`/api/connections/${id}/saved/${savedId}/publish`, { method: 'POST' }),
+
+  /** Destructive and not undoable: the broker forgets the value for every
+   *  client that connects afterwards. */
+  clearRetained: (id: string, topic: string) =>
+    request<{ topic: string; hadRetainedValue: boolean }>(
+      `/api/connections/${id}/retained/clear`,
+      { method: 'POST', body: JSON.stringify({ topic }) },
+    ),
+
+  // --- the namespace as a graph ---
+  graph: (id: string, depth = 3, nodes = 500) =>
+    request<TopicGraph>(`/api/connections/${id}/graph?depth=${depth}&nodes=${nodes}`),
+
+  // --- recordings ---
+  recordings: (id: string, params: { topic?: string; since?: string; until?: string; limit?: number } = {}) => {
+    const q = new URLSearchParams()
+    if (params.topic) q.set('topic', params.topic)
+    if (params.since) q.set('since', params.since)
+    if (params.until) q.set('until', params.until)
+    if (params.limit) q.set('limit', String(params.limit))
+    return request<RecordingsResponse>(`/api/connections/${id}/recordings?${q.toString()}`)
+  },
+  deleteRecordings: (id: string) =>
+    request<{ deleted: number }>(`/api/connections/${id}/recordings`, { method: 'DELETE' }),
+
+  // --- what was done, and what was logged ---
+  audit: (limit = 100) => request<AuditEntry[]>(`/api/audit?limit=${limit}`),
+  logs: (level = '', since = 0, limit = 500) =>
+    request<LogPage>(`/api/logs?level=${level}&since=${since}&limit=${limit}`),
 
   // --- users ---
   users: () => request<User[]>('/api/users'),

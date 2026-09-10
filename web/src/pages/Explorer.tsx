@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
-import { api, looksBinary, payloadToText } from '../api/client'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { api, payloadToText } from '../api/client'
 import type { Connection, TreeNode } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
-import { Alert, formatBytes, formatTime, Spinner, StatusBadge, prettyPayload } from '../components/common'
+import { Alert, formatTime, Spinner, StatusBadge, prettyPayload } from '../components/common'
+import { MessageLibrary } from '../components/MessageLibrary'
+import { TopicDetail } from '../components/TopicDetail'
 import { TopicTree } from '../components/TopicTree'
 import { useConnectionStatus, useLiveMessages } from '../ws/socket'
 
@@ -25,6 +27,18 @@ export function Explorer() {
   const [filter, setFilter] = useState('')
   const [appliedFilter, setAppliedFilter] = useState('')
   const [treeVersion, setTreeVersion] = useState(0)
+  // A message picked out of the history or the collection, carried to the
+  // publish form. The timestamp is what makes picking the same one twice
+  // register as a second request rather than as no change at all.
+  const [prefill, setPrefill] = useState<{ topic: string; payload: string; at: number } | null>(null)
+  const [search] = useSearchParams()
+
+  // The graph links here with a topic already chosen, so arriving from it
+  // opens that topic rather than an empty panel.
+  const linkedTopic = search.get('topic')
+  useEffect(() => {
+    if (linkedTopic) setSelected(linkedTopic)
+  }, [linkedTopic])
 
   const liveStatus = useConnectionStatus()
   const { messages, paused, setPaused, clear } = useLiveMessages(id, appliedFilter)
@@ -103,6 +117,15 @@ export function Explorer() {
             </select>
           )}
           <StatusBadge status={status} />
+          <Link className="button small" to={`/connections/${id}/status`}>
+            Broker
+          </Link>
+          <Link className="button small" to={`/connections/${id}/graph`}>
+            Namespace
+          </Link>
+          <Link className="button small" to={`/connections/${id}/recordings`}>
+            Recordings
+          </Link>
           {can('operator') && (
             <button
               onClick={async () => {
@@ -165,31 +188,15 @@ export function Explorer() {
         </div>
 
         <div>
-          {selectedNode?.value && (
-            <div className="card">
-              <div className="card-head">
-                <h2 style={{ wordBreak: 'break-all' }} className="mono">
-                  {selectedNode.value.topic}
-                </h2>
-                <div className="button-row">
-                  {selectedNode.value.retain && <span className="badge warn">retained</span>}
-                  <span className="badge">QoS {selectedNode.value.qos}</span>
-                  <span className="badge">{formatBytes(selectedNode.value.size)}</span>
-                </div>
-              </div>
-              <p className="subtitle">
-                Updated {formatTime(selectedNode.value.updatedAt)} ·{' '}
-                {selectedNode.value.count.toLocaleString()} messages
-                {looksBinary(selectedNode.value.payload) && ' · binary payload shown as hex'}
-              </p>
-              <pre className="payload">
-                {prettyPayload(payloadToText(selectedNode.value.payload)) || '(empty payload)'}
-              </pre>
-              {selectedNode.value.truncated && (
-                <p className="subtitle">Payload truncated for display.</p>
-              )}
-            </div>
-          )}
+          <TopicDetail
+            connectionId={id}
+            topic={selected}
+            node={selectedNode}
+            onChanged={() => {
+              setTreeVersion((v) => v + 1)
+              void load()
+            }}
+          />
 
           <div className="card">
             <div className="card-head">
@@ -274,14 +281,29 @@ export function Explorer() {
             </div>
           </div>
 
-          {can('operator') && <PublishPanel connectionId={id} topic={selected} />}
+          {can('operator') && (
+            <PublishPanel connectionId={id} topic={selected} prefill={prefill} />
+          )}
+          <MessageLibrary
+            connectionId={id}
+            canOperate={can('operator')}
+            onFill={(topic, payload) => setPrefill({ topic, payload, at: Date.now() })}
+          />
         </div>
       </div>
     </>
   )
 }
 
-function PublishPanel({ connectionId, topic }: { connectionId: string; topic: string }) {
+function PublishPanel({
+  connectionId,
+  topic,
+  prefill,
+}: {
+  connectionId: string
+  topic: string
+  prefill: { topic: string; payload: string; at: number } | null
+}) {
   const [form, setForm] = useState({ topic: '', payload: '', qos: 0, retain: false })
   const [status, setStatus] = useState<{ kind: 'error' | 'ok'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -291,6 +313,14 @@ function PublishPanel({ connectionId, topic }: { connectionId: string; topic: st
   useEffect(() => {
     if (topic) setForm((prev) => ({ ...prev, topic }))
   }, [topic])
+
+  // Picking one out of the history or the collection fills topic and payload
+  // both. Keyed on the timestamp rather than the contents, so choosing the
+  // same message twice refills the form instead of appearing to do nothing.
+  useEffect(() => {
+    if (!prefill) return
+    setForm((prev) => ({ ...prev, topic: prefill.topic, payload: prefill.payload }))
+  }, [prefill?.at])
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()

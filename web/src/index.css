@@ -246,7 +246,16 @@ h2 {
 .grid {
   display: grid;
   gap: 0.9rem;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* A grid item's default min-width is auto, which is its content's minimum —
+   so one child that cannot get narrower makes the whole column wider than its
+   share and the page scrolls sideways. On a phone that is the difference
+   between a working layout and a broken one, and it is invisible until
+   something with a long unbreakable run of text lands in the column. */
+.grid > * {
+  min-width: 0;
 }
 
 @media (min-width: 900px) {
@@ -1251,4 +1260,361 @@ th {
   padding: 0.1rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: 999px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Topic detail, charts, the namespace picture and the log view.
+ *
+ * Mobile first throughout: the base rules are what a phone gets, and the
+ * @media block at the end adds what a wider screen affords. Every control here
+ * is at least 44px tall, because these are the buttons somebody reaches for
+ * while standing in front of the thing they are debugging.
+ * ------------------------------------------------------------------------- */
+
+.topic-heading {
+  word-break: break-all;
+  font-size: 1rem;
+  margin: 0;
+}
+
+/* Tabs scroll sideways rather than wrapping into a second row that pushes the
+   content down on a phone. */
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  margin: 0.75rem 0 1rem;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--text-dim);
+  min-height: 44px;
+  /* Tight enough that four tabs fit a 390px phone without scrolling. They
+     scroll if they do not, but a tab strip whose last label is half cut off
+     reads as a rendering fault rather than as something to swipe. */
+  padding: 0 0.55rem;
+  white-space: nowrap;
+  font-size: 0.9rem;
+}
+
+.tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.tab:active {
+  background: var(--border);
+}
+
+button.link {
+  background: none;
+  border: none;
+  padding: 0;
+  min-height: auto;
+  color: var(--accent);
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+}
+
+button.danger,
+.button.danger {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+button.danger:active {
+  background: var(--warn-bg);
+}
+
+/* An image payload. Bounded so a camera frame does not push the rest of the
+   page off the screen. */
+.payload-image {
+  max-width: 100%;
+  max-height: 60vh;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--border);
+}
+
+/* The timeline scrubber. A range input is a 44px tap target only if it is
+   told to be one. */
+.timeline input[type='range'] {
+  width: 100%;
+  min-height: 44px;
+}
+
+/* A diff, line by line. */
+.payload.diff {
+  padding: 0;
+}
+
+.payload.diff > div {
+  padding: 0 0.5rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff-marker {
+  display: inline-block;
+  width: 1.2em;
+  opacity: 0.7;
+  user-select: none;
+}
+
+.diff-added {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.diff-removed {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+/* Charts scale with the viewBox, so one rule covers every width. */
+.chart {
+  margin: 0.5rem 0;
+}
+
+.chart svg {
+  width: 100%;
+  height: 160px;
+  display: block;
+}
+
+.chart-line {
+  stroke: var(--accent);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-point {
+  fill: var(--accent);
+}
+
+.chart-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-label {
+  fill: var(--text-dim);
+  font-size: 10px;
+  font-family: inherit;
+}
+
+/* Statistics tiles. One column on a phone, because two columns of numbers at
+   this width is two columns of nothing. */
+.tiles {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.tile {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.tile.warn {
+  border-color: var(--warn);
+}
+
+.tile-label {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+.tile-value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* The namespace picture: nested blocks, indented by depth. */
+.graph {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow-x: auto;
+}
+
+.graph-branch {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.graph-node {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-left-width: 5px;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  min-height: 44px;
+  padding: 0.5rem 0.7rem;
+}
+
+.graph-node:active {
+  background: var(--border);
+}
+
+.graph-name {
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.graph-meta {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+}
+
+.graph-children {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-left: 0.9rem;
+  padding-left: 0.6rem;
+  border-left: 1px dashed var(--border);
+}
+
+/* The log view. Monospace and dense, but still wrapping rather than forcing a
+   horizontal scroll of the whole page. */
+.log {
+  max-height: 60vh;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem;
+}
+
+.log-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--border);
+  word-break: break-word;
+}
+
+.log-time {
+  color: var(--text-dim);
+}
+
+.log-level {
+  font-weight: 600;
+  min-width: 3.2rem;
+}
+
+.log-warn .log-level {
+  color: var(--warn);
+}
+
+.log-error .log-level {
+  color: var(--warn);
+}
+
+.log-message {
+  flex: 1 1 12rem;
+}
+
+.log-attrs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  color: var(--text-dim);
+  flex-basis: 100%;
+}
+
+/* Saved messages. */
+.saved-form {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.saved-folder-name {
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  margin: 0.75rem 0 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.saved-item {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem;
+  margin-bottom: 0.4rem;
+}
+
+.saved-item-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-bottom: 0.4rem;
+}
+
+.saved-item-head .mono {
+  word-break: break-all;
+  font-size: 0.85rem;
+}
+
+@media (min-width: 641px) {
+  .topic-heading {
+    font-size: 1.15rem;
+  }
+
+  /* Two or three columns of numbers once there is room for them to read as a
+     row rather than as a list. */
+  .tiles {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+
+  .chart svg {
+    height: 200px;
+  }
+
+  .tab {
+    padding: 0 0.9rem;
+    font-size: 0.95rem;
+  }
+
+  .log {
+    font-size: 0.85rem;
+  }
+
+  .log-attrs {
+    flex-basis: auto;
+  }
+
+  .saved-item-head {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 0.6rem;
+  }
 }

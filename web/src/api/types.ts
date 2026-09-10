@@ -99,6 +99,14 @@ export interface Connection {
   subscriptions: Subscription[]
   autoConnect: boolean
   historySize: number
+  topicLogEntries: number
+  topicLogBudget: number
+  /** Holds a $SYS/# subscription open so the broker's own statistics arrive. */
+  sysStats: boolean
+  /** Writes every message to the database. The one setting that makes the
+   *  database grow with broker traffic rather than with configuration. */
+  recordToDisk: boolean
+  recordKeep: number
   status: Status
   topics: number
   treeFull: boolean
@@ -128,6 +136,12 @@ export interface ConnectionInput {
   subscriptions: Subscription[]
   autoConnect: boolean
   historySize: number
+  topicLogEntries?: number
+  topicLogBudget?: number
+  sysStats?: boolean
+  recordToDisk?: boolean
+  recordKeep?: number
+  connectTimeout?: number
 }
 
 export interface MessageProps {
@@ -446,4 +460,255 @@ export interface TwoFactorStatus {
   recoveryCodesLeft: number
   requiredByPolicy: boolean
   requiredForThisUser: boolean
+}
+
+// --- topic history, charts and payload decoding ---
+
+/**
+ * HistoryEntry is one message from a topic's own history.
+ *
+ * The payload arrives as text when it was valid UTF-8 and as base64 when it
+ * was not, with `base64` saying which. That is not the same convention as
+ * Message, whose payload is always base64 — the timeline is read by a person
+ * far more often than it is decoded by code, and most payloads are text.
+ */
+export interface HistoryEntry {
+  seq: number
+  receivedAt: string
+  payload: string
+  base64?: boolean
+  size: number
+  qos: number
+  retain: boolean
+  truncated?: boolean
+}
+
+export interface TopicHistory {
+  topic: string
+  entries: HistoryEntry[]
+  span?: { first: string; last: string; count: number }
+}
+
+export interface TopicDiff {
+  topic: string
+  current: HistoryEntry
+  /** Absent when the topic has been seen only once. */
+  previous?: HistoryEntry
+}
+
+export interface SeriesPoint {
+  t: string
+  v: number
+}
+
+export interface TopicSeries {
+  topic: string
+  field: string
+  points: SeriesPoint[]
+  /** Payloads that were not numbers at that path, counted rather than hidden. */
+  skipped: number
+}
+
+export type PayloadKind = 'empty' | 'json' | 'text' | 'image' | 'sparkplug' | 'binary'
+
+export interface DetectedPayload {
+  kind: PayloadKind
+  mediaType?: string
+  size: number
+}
+
+export interface SparkplugMetric {
+  name?: string
+  alias?: number
+  hasAlias?: boolean
+  dataType?: string
+  value?: string
+  note?: string
+  isNull?: boolean
+  isHistorical?: boolean
+  isTransient?: boolean
+  timestamp?: string
+}
+
+export interface SparkplugPayload {
+  timestamp?: string
+  seq?: number
+  uuid?: string
+  metrics: SparkplugMetric[]
+  bodyBytes?: number
+}
+
+export interface SparkplugTopic {
+  group: string
+  messageType: string
+  edgeNode: string
+  device?: string
+}
+
+export interface TopicDecode {
+  topic: string
+  detected: DetectedPayload
+  truncated?: boolean
+  sparkplug?: SparkplugPayload
+  sparkplugTopic?: SparkplugTopic
+  sparkplugError?: string
+}
+
+// --- broker statistics ---
+
+export interface BrokerStats {
+  available: boolean
+  version?: string
+  uptime?: number
+  hasUptime?: boolean
+  description?: string
+  clients: {
+    connected?: number
+    total?: number
+    maximum?: number
+    disconnected?: number
+    expired?: number
+  }
+  messages: { received?: number; sent?: number; stored?: number; dropped?: number }
+  bytes: { received?: number; sent?: number }
+  subscriptions?: number
+  retained?: number
+  heap: { current?: number; maximum?: number }
+  load?: Record<string, number>
+  raw?: Record<string, string>
+  updatedAt?: string
+}
+
+export interface BrokerStatsResponse {
+  enabled: boolean
+  connected: boolean
+  stats: BrokerStats
+}
+
+// --- publishing ---
+
+export interface PublishRecord {
+  id: number
+  connectionId: string
+  username?: string
+  topic: string
+  payload: string
+  payloadBase64?: boolean
+  qos: number
+  retain: boolean
+  publishedAt: string
+}
+
+export interface SavedMessage {
+  id: string
+  connectionId?: string
+  folder: string
+  name: string
+  topic: string
+  payload: string
+  payloadBase64?: boolean
+  qos: number
+  retain: boolean
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SavedMessageInput {
+  folder: string
+  name: string
+  topic: string
+  payload: string
+  payloadBase64?: boolean
+  qos: number
+  retain: boolean
+  sortOrder?: number
+  global?: boolean
+}
+
+// --- collection windows ---
+
+export interface Collection {
+  filter: string
+  started: string
+  ended: string
+  seconds: number
+  messages: HistoryEntry[]
+  topics: Record<string, number>
+  dropped: number
+  truncated: boolean
+}
+
+// --- the namespace as a graph ---
+
+export interface GraphNode {
+  name: string
+  topic: string
+  depth: number
+  messages: number
+  topics: number
+  children: number
+  updatedAt?: string
+  truncated?: boolean
+}
+
+export interface TopicGraph {
+  nodes: GraphNode[]
+  topics: number
+  messages: number
+  truncated: boolean
+  treeFull: boolean
+  newest?: string
+  countingSince?: string
+}
+
+// --- audit and logs ---
+
+export interface AuditEntry {
+  id: number
+  at: string
+  username: string
+  action: string
+  target?: string
+  detail?: string
+}
+
+export interface LogRecord {
+  time: string
+  level: string
+  message: string
+  attrs?: Record<string, string>
+  seq: number
+}
+
+export interface LogPage {
+  records: LogRecord[]
+  seq: number
+}
+
+// --- recordings ---
+
+export interface RecordedMessage {
+  id: number
+  topic: string
+  payload: string
+  payloadBase64?: boolean
+  qos: number
+  retain: boolean
+  receivedAt: string
+}
+
+export interface RecordingStats {
+  rows: number
+  oldest?: string
+  newest?: string
+  payloadBytes: number
+}
+
+export interface RecordingsResponse {
+  recording: boolean
+  messages: RecordedMessage[]
+  stats?: RecordingStats
+  /** What the recorder wrote and what it had to drop. */
+  recorder?: { written: number; dropped: number }
 }
