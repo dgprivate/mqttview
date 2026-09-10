@@ -48,6 +48,9 @@ func (s *Server) mountConnections(r chi.Router) {
 			r.Get("/topic/decode", s.handleTopicDecode)
 			r.Get("/topic/raw", s.handleTopicRaw)
 
+			// The namespace as a picture rather than a list.
+			r.Get("/graph", s.handleGraph)
+
 			// What the broker says about itself.
 			r.Get("/sys", s.handleBrokerStats)
 

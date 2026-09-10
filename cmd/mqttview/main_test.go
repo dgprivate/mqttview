@@ -90,7 +90,7 @@ func TestNewLoggerLevels(t *testing.T) {
 		{"nonsense", slog.LevelInfo},
 		{"", slog.LevelInfo},
 	} {
-		log := newLogger(tc.in)
+		log, _ := newLogger(tc.in)
 		if log.Enabled(context.Background(), tc.want-1) {
 			t.Errorf("%q logs below %v", tc.in, tc.want)
 		}

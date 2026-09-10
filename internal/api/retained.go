@@ -7,6 +7,7 @@ import (
 
 	"github.com/dgprivate/mqttview/internal/auth"
 	"github.com/dgprivate/mqttview/internal/httpx"
+	"github.com/dgprivate/mqttview/internal/logbuf"
 	"github.com/dgprivate/mqttview/internal/mqttc"
 	"github.com/dgprivate/mqttview/internal/store"
 )
@@ -124,4 +125,45 @@ func byteCount(n int) string {
 	default:
 		return strconv.Itoa(n/1024) + " KiB"
 	}
+}
+
+// handleLogs returns the recent log records.
+//
+// Admin only. Log lines name accounts, topics and broker hostnames, and the
+// point of the view is to see what went wrong — which is exactly the material
+// that should not be readable by everyone with a session.
+func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	if s.logs == nil {
+		httpx.WriteError(w, http.StatusServiceUnavailable,
+			"this build keeps no log buffer, so there is nothing to show")
+		return
+	}
+
+	level, ok := logbuf.ParseLevel(r.URL.Query().Get("level"))
+	if !ok {
+		httpx.WriteError(w, http.StatusBadRequest, "level must be debug, info, warn or error")
+		return
+	}
+
+	var since uint64
+	if raw := r.URL.Query().Get("since"); raw != "" {
+		v, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			httpx.WriteError(w, http.StatusBadRequest, "since must be a sequence number from an earlier read")
+			return
+		}
+		since = v
+	}
+
+	records := s.logs.Records(level, since, intParam(r, "limit", 500))
+	if records == nil {
+		records = []logbuf.Record{}
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"records": records,
+		// The newest sequence number whether or not anything matched the
+		// filter, so a poll that saw nothing still moves forward instead of
+		// re-reading the same records at the next level change.
+		"seq": s.logs.Seq(),
+	})
 }

@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"net/http"
+	"strconv"
 	"testing"
 )
 
@@ -122,5 +123,108 @@ func TestClearingRetainedNeedsASession(t *testing.T) {
 		map[string]any{"topic": "a/b"})
 	if got != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", got)
+	}
+}
+
+func TestTheLogViewShowsWhatWasLogged(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+
+	// Any request produces a log line; a publish produces one that says so.
+	connID := subscribedBroker(t, ts)
+	ts.decode(ts.do(http.MethodPost, "/api/connections/"+connID+"/publish",
+		map[string]any{"topic": "logged/topic", "payload": "x"}), http.StatusOK, nil)
+
+	var body struct {
+		Records []struct {
+			Level   string            `json:"level"`
+			Message string            `json:"message"`
+			Attrs   map[string]string `json:"attrs"`
+			Seq     uint64            `json:"seq"`
+		} `json:"records"`
+		Seq uint64 `json:"seq"`
+	}
+	ts.decode(ts.do(http.MethodGet, "/api/logs", nil), http.StatusOK, &body)
+
+	var found bool
+	for _, r := range body.Records {
+		if r.Message == "publish" && r.Attrs["topic"] == "logged/topic" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the publish is not in the log view; %d records were returned", len(body.Records))
+	}
+	if body.Seq == 0 {
+		t.Error("no sequence number was returned, so a view cannot poll for what is new")
+	}
+}
+
+func TestTheLogViewFiltersByLevel(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+
+	var body struct {
+		Records []struct {
+			Level string `json:"level"`
+		} `json:"records"`
+	}
+	ts.decode(ts.do(http.MethodGet, "/api/logs?level=error", nil), http.StatusOK, &body)
+
+	for _, r := range body.Records {
+		if r.Level != "ERROR" {
+			t.Errorf("filtering at error returned a %s record", r.Level)
+		}
+	}
+}
+
+// A poll that saw nothing still has to move forward, or the next read repeats
+// everything it already had.
+func TestPollingTheLogViewOnlyReturnsWhatIsNew(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+
+	var first struct {
+		Seq uint64 `json:"seq"`
+	}
+	ts.decode(ts.do(http.MethodGet, "/api/logs", nil), http.StatusOK, &first)
+
+	var second struct {
+		Records []struct {
+			Seq uint64 `json:"seq"`
+		} `json:"records"`
+	}
+	ts.decode(ts.do(http.MethodGet, "/api/logs?since="+strconv.FormatUint(first.Seq, 10), nil),
+		http.StatusOK, &second)
+
+	for _, r := range second.Records {
+		if r.Seq <= first.Seq {
+			t.Errorf("record %d was returned again after being seen", r.Seq)
+		}
+	}
+}
+
+func TestAnUnknownLogLevelIsRefused(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+
+	if got := ts.status(http.MethodGet, "/api/logs?level=verbose", nil); got != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", got)
+	}
+}
+
+// Log lines name accounts, topics and broker hostnames.
+func TestTheLogViewIsAdminOnly(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+
+	const opEmail, opPassword = "op2@example.com", "operator-long-password-2"
+	ts.decode(ts.do(http.MethodPost, "/api/users", map[string]any{
+		"email": opEmail, "password": opPassword, "role": "operator",
+	}), http.StatusCreated, nil)
+
+	operator := ts.asUser(t, opEmail, opPassword)
+	if got := operator.status(http.MethodGet, "/api/logs", nil); got != http.StatusForbidden {
+		t.Errorf("an operator read the log view: status = %d, want 403", got)
 	}
 }

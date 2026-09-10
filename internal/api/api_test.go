@@ -20,6 +20,7 @@ import (
 	"github.com/dgprivate/mqttview/internal/auth"
 	"github.com/dgprivate/mqttview/internal/config"
 	"github.com/dgprivate/mqttview/internal/hub"
+	"github.com/dgprivate/mqttview/internal/logbuf"
 	"github.com/dgprivate/mqttview/internal/mqttc"
 	"github.com/dgprivate/mqttview/internal/plugin"
 	"github.com/dgprivate/mqttview/internal/secrets"
@@ -77,7 +78,14 @@ func newTestServer(t *testing.T, mutate ...func(*config.Config)) *testServer {
 		m(&cfg)
 	}
 
-	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
+	// The ring the log view reads, wrapped around a console that discards.
+	// Wired here rather than left nil so the log endpoint is exercised the way
+	// it runs, not as the "no buffer" fallback.
+	// Debug rather than error, with the output discarded: the level decides
+	// what the ring keeps as well as what is printed, and a test of the log
+	// view needs records in it. Nothing is printed either way.
+	logs := logbuf.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug}), 0)
+	log := slog.New(logs)
 	authSvc := auth.New(db, cfg, box, log)
 	if _, _, err := authSvc.BootstrapAdmin(adminEmail, adminPassword); err != nil {
 		t.Fatalf("bootstrap admin: %v", err)
@@ -97,7 +105,7 @@ func newTestServer(t *testing.T, mutate ...func(*config.Config)) *testServer {
 
 	opts := api.Options{
 		Config: cfg, Log: log, Store: db, Auth: authSvc,
-		MQTT: mgr, Hub: h, Plugins: plugins, Version: "test",
+		MQTT: mgr, Hub: h, Plugins: plugins, Version: "test", Logs: logs,
 		// A stand-in for the built frontend, so the SPA fallback is exercised
 		// and a redirect to /login lands somewhere rather than 404ing.
 		Web: testFrontend(),

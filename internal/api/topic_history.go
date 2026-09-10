@@ -514,3 +514,40 @@ func (s *Server) handleTopicRaw(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(value.Payload)
 }
+
+// handleGraph returns the namespace as a graph: what the branches are, how
+// much traffic each carries and how recently.
+//
+// The counts are the tree's own aggregates rather than a rate computed here.
+// The window each count covers is reported alongside them, so a caller that
+// wants a rate can divide by a number that is true rather than being handed
+// one that quietly assumes the connection has been up the whole time.
+func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
+	c, ok := s.conn(w, r)
+	if !ok {
+		return
+	}
+
+	nodes, newest, truncated := c.Tree().Graph(intParam(r, "depth", 3), intParam(r, "nodes", 500))
+	if nodes == nil {
+		nodes = []mqttc.GraphNode{}
+	}
+
+	topics, messages, full := c.Tree().Stats()
+	resp := map[string]any{
+		"nodes":     nodes,
+		"topics":    topics,
+		"messages":  messages,
+		"truncated": truncated,
+		// treeFull is a different thing from truncated: the graph left nodes
+		// out to fit, the tree stopped recording new topics entirely.
+		"treeFull": full,
+	}
+	if !newest.IsZero() {
+		resp["newest"] = newest
+	}
+	if since := c.Status().ConnectedAt; since != nil {
+		resp["countingSince"] = since
+	}
+	httpx.WriteJSON(w, http.StatusOK, resp)
+}

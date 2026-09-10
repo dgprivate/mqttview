@@ -64,6 +64,11 @@ type treeNode struct {
 
 	// subMessages counts messages at or below this node.
 	subMessages uint64
+	// subUpdatedAt is the most recent message at or below this node. Kept on
+	// the write path with the counters rather than computed on read: the graph
+	// asks for it once per node, and walking each node's subtree to find it
+	// turns drawing a large namespace into quadratic work.
+	subUpdatedAt time.Time
 	// subTopics counts value-bearing topics at or below this node.
 	subTopics int
 }
@@ -140,6 +145,9 @@ func (t *Tree) Record(m Message) {
 	t.messages++
 	for _, n := range path {
 		n.subMessages++
+		if m.ReceivedAt.After(n.subUpdatedAt) {
+			n.subUpdatedAt = m.ReceivedAt
+		}
 	}
 }
 
@@ -321,3 +329,95 @@ func (n *treeNode) value() TopicValue {
 		Count:     n.count,
 	}
 }
+
+// GraphNode is one node of the namespace, aggregated for a picture of it.
+//
+// Messages and Topics are counts at or below the node, which is what makes a
+// parent worth drawing at all: "home" carrying forty thousand messages is the
+// fact, and its individual leaves are not.
+type GraphNode struct {
+	Name     string `json:"name"`
+	Topic    string `json:"topic"`
+	Depth    int    `json:"depth"`
+	Messages uint64 `json:"messages"`
+	Topics   int    `json:"topics"`
+	Children int    `json:"children"`
+	// UpdatedAt is the most recent message at or below the node, so recency
+	// can colour it. Zero when nothing below it has ever carried a value.
+	UpdatedAt time.Time `json:"updatedAt,omitzero"`
+	// Truncated says this node has children that were not returned, so the
+	// picture can say so rather than implying a leaf.
+	Truncated bool `json:"truncated,omitempty"`
+}
+
+// Graph returns the namespace down to maxDepth, at most maxNodes nodes.
+//
+// The busiest branches are kept when the budget runs out, because a graph of
+// a broker's namespace is drawn to answer "what is loud here", and dropping
+// the loud branch to make room for a quiet one answers the opposite question.
+func (t *Tree) Graph(maxDepth, maxNodes int) ([]GraphNode, time.Time, bool) {
+	if maxDepth <= 0 {
+		maxDepth = 3
+	}
+	if maxNodes <= 0 {
+		maxNodes = 500
+	}
+
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	var out []GraphNode
+	truncated := false
+
+	// Breadth-first, so a shallow node is never dropped to make room for a
+	// deep one: the top of the namespace is the part that has to be there.
+	level := []*treeNode{t.root}
+	for depth := 1; depth <= maxDepth && len(level) > 0; depth++ {
+		var next []*treeNode
+		for _, parent := range level {
+			children := make([]*treeNode, 0, len(parent.children))
+			for _, child := range parent.children {
+				children = append(children, child)
+			}
+			// Loudest first, so the budget is spent on what the picture is for.
+			sort.Slice(children, func(i, j int) bool {
+				return children[i].subMessages > children[j].subMessages
+			})
+
+			for _, child := range children {
+				if len(out) >= maxNodes {
+					truncated = true
+					break
+				}
+				node := GraphNode{
+					Name:      child.name,
+					Topic:     child.topic,
+					Depth:     depth,
+					Messages:  child.subMessages,
+					Topics:    child.subTopics,
+					Children:  len(child.children),
+					UpdatedAt: child.subUpdatedAt,
+				}
+				// A node at the depth limit that still has children is a
+				// branch, not a leaf, and the picture should not pretend.
+				if depth == maxDepth && len(child.children) > 0 {
+					node.Truncated = true
+				}
+				out = append(out, node)
+				if depth < maxDepth {
+					next = append(next, child)
+				}
+			}
+			if len(out) >= maxNodes {
+				truncated = true
+				break
+			}
+		}
+		level = next
+	}
+
+	return out, t.newest(), truncated
+}
+
+// newest is the most recent update anywhere. Caller holds the lock.
+func (t *Tree) newest() time.Time { return t.root.subUpdatedAt }

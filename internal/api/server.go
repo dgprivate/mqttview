@@ -19,6 +19,7 @@ import (
 	"github.com/dgprivate/mqttview/internal/config"
 	"github.com/dgprivate/mqttview/internal/httpx"
 	"github.com/dgprivate/mqttview/internal/hub"
+	"github.com/dgprivate/mqttview/internal/logbuf"
 	"github.com/dgprivate/mqttview/internal/mqttc"
 	"github.com/dgprivate/mqttview/internal/plugin"
 	"github.com/dgprivate/mqttview/internal/store"
@@ -34,6 +35,7 @@ type Server struct {
 	hub     *hub.Hub
 	plugins *plugin.Runtime
 	web     fs.FS
+	logs    *logbuf.Buffer
 
 	// leases counts the collection windows holding an ephemeral subscription,
 	// keyed by connection and filter, so two overlapping windows on the same
@@ -57,6 +59,9 @@ type Options struct {
 	// happens during `npm run dev` with the Vite proxy in front.
 	Web     fs.FS
 	Version string
+	// Logs is the in-memory ring behind the log view. Nil disables it, which
+	// is what a test that does not care about logs gets.
+	Logs *logbuf.Buffer
 }
 
 // New builds a Server.
@@ -70,6 +75,7 @@ func New(o Options) *Server {
 		log:     log,
 		db:      o.Store,
 		leases:  map[string]int{},
+		logs:    o.Logs,
 		auth:    o.Auth,
 		mqtt:    o.MQTT,
 		hub:     o.Hub,
@@ -165,6 +171,9 @@ func (s *Server) Handler() http.Handler {
 				// What has been done to the world outside mqttview. Admin
 				// only: it names accounts and their actions.
 				r.With(s.auth.RequireRole(store.RoleAdmin)).Get("/audit", s.handleAuditLog)
+
+				// Log lines name accounts, topics and hostnames.
+				r.With(s.auth.RequireRole(store.RoleAdmin)).Get("/logs", s.handleLogs)
 				s.mountUsers(r)
 				s.mountPlugins(r)
 

@@ -21,6 +21,7 @@ import (
 	"github.com/dgprivate/mqttview/internal/auth"
 	"github.com/dgprivate/mqttview/internal/config"
 	"github.com/dgprivate/mqttview/internal/hub"
+	"github.com/dgprivate/mqttview/internal/logbuf"
 	"github.com/dgprivate/mqttview/internal/mqttc"
 	"github.com/dgprivate/mqttview/internal/plugin"
 	"github.com/dgprivate/mqttview/internal/secrets"
@@ -73,7 +74,7 @@ func run() error {
 		return probeHealth(*addr)
 	}
 
-	log := newLogger(*logLevel)
+	log, logs := newLogger(*logLevel)
 	slog.SetDefault(log)
 
 	cfg, err := config.Load(*configPath)
@@ -190,6 +191,7 @@ func run() error {
 		Plugins: plugins,
 		Web:     webFS,
 		Version: version,
+		Logs:    logs,
 	})
 
 	httpSrv := &http.Server{
@@ -407,7 +409,7 @@ func sessionSweeper(ctx context.Context, a *auth.Service) {
 	}
 }
 
-func newLogger(level string) *slog.Logger {
+func newLogger(level string) (*slog.Logger, *logbuf.Buffer) {
 	var lvl slog.Level
 	switch strings.ToLower(level) {
 	case "debug":
@@ -419,7 +421,12 @@ func newLogger(level string) *slog.Logger {
 	default:
 		lvl = slog.LevelInfo
 	}
-	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: lvl}))
+	// The ring sits in front of the console handler rather than beside it, so
+	// the log view and standard error cannot disagree about what was logged.
+	// It keeps debug records whatever the console level is: the reason to open
+	// the view is that something went wrong at a level nobody was printing.
+	logs := logbuf.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: lvl}), 0)
+	return slog.New(logs), logs
 }
 
 func envOr(key, def string) string {
