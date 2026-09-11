@@ -232,3 +232,44 @@ func TestEnabledMatchesTheWrappedHandler(t *testing.T) {
 		t.Error("error is disabled on a handler configured for error")
 	}
 }
+
+// A logger derived twice — grouped and then given attributes, as packages do —
+// must still reach the same ring, or the view is empty of the components that
+// log the most.
+func TestALoggerDerivedMoreThanOnceStillLandsInTheBuffer(t *testing.T) {
+	b, _ := newTestBuffer(10, slog.LevelDebug)
+
+	log := slog.New(b).WithGroup("mqtt").With("connection", "house").With("attempt", 2)
+	log.Info("reconnecting")
+
+	got := b.Records(slog.LevelDebug, 0, 0)
+	if len(got) != 1 {
+		t.Fatalf("got %d records from a twice-derived logger, want 1", len(got))
+	}
+	if got[0].Attrs["connection"] != "house" || got[0].Attrs["attempt"] != "2" {
+		t.Errorf("attrs = %v, want both derived attributes", got[0].Attrs)
+	}
+}
+
+func TestAGroupDerivedFromAChildAlsoReachesTheBuffer(t *testing.T) {
+	b, _ := newTestBuffer(10, slog.LevelDebug)
+
+	log := slog.New(b).With("component", "store").WithGroup("sql")
+	log.Warn("slow query")
+
+	got := b.Records(slog.LevelDebug, 0, 0)
+	if len(got) != 1 || got[0].Message != "slow query" {
+		t.Fatalf("got %+v, want the one record", got)
+	}
+}
+
+// An unrecognised level is shown rather than filtered out: a custom level
+// hidden by a filter nobody set is worse than one that appears too often.
+func TestAnUnrecognisedLevelIsNotSilentlyFilteredAway(t *testing.T) {
+	b, _ := newTestBuffer(10, slog.LevelDebug)
+	slog.New(b).Log(context.Background(), slog.Level(12), "something unusual")
+
+	if got := b.Records(slog.LevelError, 0, 0); len(got) != 1 {
+		t.Errorf("got %d records, want the unusual one to survive an error filter", len(got))
+	}
+}

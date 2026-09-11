@@ -581,3 +581,64 @@ func TestASparkplugTopicIsDecodedRatherThanShownAsBinary(t *testing.T) {
 		t.Errorf("metric = %+v, want temperature/21/Int32", m)
 	}
 }
+
+func TestTheNamespaceGraphCountsWhatIsBelowEachBranch(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+	connID := subscribedBroker(t, ts)
+
+	publishAndWait(t, ts, connID, "house/kitchen/temp", "21", 1)
+	publishAndWait(t, ts, connID, "house/kitchen/hum", "40", 1)
+	publishAndWait(t, ts, connID, "house/hall/motion", "OFF", 1)
+
+	var body struct {
+		Nodes []struct {
+			Topic     string `json:"topic"`
+			Depth     int    `json:"depth"`
+			Messages  int    `json:"messages"`
+			Topics    int    `json:"topics"`
+			Truncated bool   `json:"truncated"`
+		} `json:"nodes"`
+		Topics    int  `json:"topics"`
+		Messages  int  `json:"messages"`
+		Truncated bool `json:"truncated"`
+		TreeFull  bool `json:"treeFull"`
+	}
+	ts.decode(ts.do(http.MethodGet, "/api/connections/"+connID+"/graph?depth=2&nodes=100", nil),
+		http.StatusOK, &body)
+
+	find := func(topic string) (int, int, bool) {
+		for _, n := range body.Nodes {
+			if n.Topic == topic {
+				return n.Messages, n.Topics, true
+			}
+		}
+		return 0, 0, false
+	}
+
+	messages, topics, ok := find("house")
+	if !ok {
+		t.Fatalf("the top of the namespace is missing: %+v", body.Nodes)
+	}
+	if messages != 3 || topics != 3 {
+		t.Errorf("house carries %d messages over %d topics, want 3 and 3", messages, topics)
+	}
+
+	if _, _, ok := find("house/kitchen"); !ok {
+		t.Error("the second level is missing at depth 2")
+	}
+	// Depth 2 was asked for, so nothing deeper should come back.
+	for _, n := range body.Nodes {
+		if n.Depth > 2 {
+			t.Errorf("node %q is at depth %d, past the limit asked for", n.Topic, n.Depth)
+		}
+	}
+}
+
+func TestTheGraphNeedsASession(t *testing.T) {
+	ts := newTestServer(t)
+
+	if got := ts.status(http.MethodGet, "/api/connections/any/graph", nil); got != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", got)
+	}
+}

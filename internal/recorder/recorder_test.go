@@ -290,3 +290,73 @@ func TestStoppingTwiceDoesNotPanic(t *testing.T) {
 	r.Stop()
 	r.Stop()
 }
+
+func TestRecordingReportsWhatWasConfigured(t *testing.T) {
+	r := New(newTestStore(t), quietLogger())
+
+	if r.Recording("c1") {
+		t.Error("a connection nobody configured reports itself as recording")
+	}
+	r.Configure("c1", true, 0)
+	if !r.Recording("c1") {
+		t.Error("a connection configured to record does not report itself as recording")
+	}
+	r.Configure("c1", false, 0)
+	if r.Recording("c1") {
+		t.Error("a connection switched off still reports itself as recording")
+	}
+}
+
+// Retention runs on a timer in the background. The timer is minutes long, so
+// this exercises the work it does rather than waiting for it.
+func TestThePruneSweepEnforcesEachConnectionsRetention(t *testing.T) {
+	db := newTestStore(t)
+	r := New(db, quietLogger())
+	r.Configure("c1", true, 3)
+
+	batch := make([]store.RecordedMessage, 0, 20)
+	for i := range 20 {
+		batch = append(batch, store.RecordedMessage{
+			ConnectionID: "c1", Topic: "a/b", Payload: []byte{byte(i)}, ReceivedAt: time.Now(),
+		})
+	}
+	if err := db.AppendRecorded(batch); err != nil {
+		t.Fatal(err)
+	}
+
+	r.prune()
+
+	got, _ := db.Recorded(store.RecordedQuery{ConnectionID: "c1"})
+	if len(got) != 3 {
+		t.Errorf("kept %d rows after the sweep, want the retention limit of 3", len(got))
+	}
+}
+
+// A connection that is not recording is not swept, so turning recording off
+// does not quietly delete what was already captured.
+func TestTheSweepLeavesAConnectionThatStoppedRecordingAlone(t *testing.T) {
+	db := newTestStore(t)
+	r := New(db, quietLogger())
+
+	if err := db.AppendRecorded([]store.RecordedMessage{
+		{ConnectionID: "c1", Topic: "a/b", Payload: []byte("x"), ReceivedAt: time.Now()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Never configured, so never swept.
+	r.prune()
+
+	got, _ := db.Recorded(store.RecordedQuery{ConnectionID: "c1"})
+	if len(got) != 1 {
+		t.Errorf("the sweep removed %d rows from a connection it does not record", 1-len(got))
+	}
+}
+
+func TestANilLoggerIsAcceptedRatherThanPanicking(t *testing.T) {
+	r := New(newTestStore(t), nil)
+	r.Configure("c1", true, 0)
+	r.Start(context.Background())
+	r.Observe(msg("a/b", "x"))
+	r.Stop()
+}

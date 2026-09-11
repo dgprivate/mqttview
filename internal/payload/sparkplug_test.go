@@ -354,3 +354,147 @@ func FuzzDecodeSparkplug(f *testing.F) {
 		}
 	})
 }
+
+// Every datatype a device may publish. One not handled is a metric that shows
+// as blank, or worse as a confident wrong number.
+func TestTheRemainingDatatypesAreRead(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		datatype uint64
+		build    func(*pb)
+		want     string
+		note     string
+	}{
+		{"UInt8", dtUInt8, func(p *pb) { p.varint(fMetricInt, 250) }, "250", ""},
+		{"UInt16", dtUInt16, func(p *pb) { p.varint(fMetricInt, 65000) }, "65000", ""},
+		{"UInt64", dtUInt64, func(p *pb) { p.varint(fMetricLong, 18446744073709551615) }, "18446744073709551615", ""},
+		{"UUID", dtUUID, func(p *pb) { p.str(fMetricString, "8f14e45f") }, "8f14e45f", ""},
+		{"File", dtFile, func(p *pb) { p.bytes(fMetricBytes, []byte{1, 2}) }, "", "2 bytes"},
+		{"Template", dtTemplate, func(p *pb) { p.bytes(fMetricTemplate, []byte{1, 2, 3}) }, "", "template"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			m := decodeOne(t, payloadOf(metric("t", c.datatype, c.build)))
+			if c.want != "" && m.Value != c.want {
+				t.Errorf("value = %q, want %q", m.Value, c.want)
+			}
+			if c.note != "" && !strings.Contains(m.Note, c.note) {
+				t.Errorf("note = %q, want it to mention %q", m.Note, c.note)
+			}
+			if m.DataType == "" {
+				t.Error("the datatype was not named")
+			}
+		})
+	}
+}
+
+// The array types are named even though their contents are not expanded, so a
+// metric is never a blank row with no explanation.
+func TestArrayDatatypesAreNamedEvenThoughTheyAreNotExpanded(t *testing.T) {
+	m := decodeOne(t, payloadOf(metric("readings", 30, func(p *pb) {
+		p.bytes(fMetricBytes, []byte{1, 2, 3, 4})
+	})))
+	if m.DataType != "FloatArray" {
+		t.Errorf("dataType = %q, want FloatArray", m.DataType)
+	}
+	if m.Value == "" && m.Note == "" {
+		t.Error("an array metric came back with neither a value nor an explanation")
+	}
+}
+
+func TestMetricFlagsAreCarried(t *testing.T) {
+	m := decodeOne(t, payloadOf(metric("t", dtInt32, func(p *pb) {
+		p.varint(fMetricIsHistorical, 1)
+		p.varint(fMetricIsTransient, 1)
+		p.varint(fMetricTimestamp, 1609459200000)
+		p.varint(fMetricAlias, 7)
+		p.varint(fMetricInt, 1)
+	})))
+
+	if !m.IsHistorical {
+		t.Error("the historical flag was dropped, so old data would look live")
+	}
+	if !m.IsTransient {
+		t.Error("the transient flag was dropped")
+	}
+	if !m.HasAlias || m.Alias != 7 {
+		t.Errorf("alias = %d (present %v), want 7", m.Alias, m.HasAlias)
+	}
+	if m.Timestamp == nil {
+		t.Error("the metric's own timestamp was dropped")
+	}
+}
+
+// A payload carrying only a body is legal: the specification allows a
+// publisher to bypass metrics entirely.
+func TestAPayloadWithOnlyABodyIsAccepted(t *testing.T) {
+	p := (&pb{}).bytes(fPayloadBody, []byte("anything at all"))
+
+	got, err := DecodeSparkplug(p.out)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.BodyBytes != len("anything at all") {
+		t.Errorf("bodyBytes = %d, want %d", got.BodyBytes, len("anything at all"))
+	}
+	if len(got.Metrics) != 0 {
+		t.Errorf("got %d metrics from a body-only payload", len(got.Metrics))
+	}
+}
+
+// Groups were removed from the language long before Sparkplug was written.
+// Refusing beats guessing at a nesting depth.
+func TestTheDeprecatedGroupEncodingIsRefused(t *testing.T) {
+	p := &pb{}
+	p.tag(9, wireSGroup)
+
+	if _, err := DecodeSparkplug(p.out); err == nil {
+		t.Error("a group-encoded field was accepted")
+	}
+}
+
+func TestAnUnknownWireTypeIsRefused(t *testing.T) {
+	p := &pb{}
+	p.tag(9, 6) // 6 and 7 are not wire types
+
+	if _, err := DecodeSparkplug(p.out); err == nil {
+		t.Error("an undefined wire type was accepted")
+	}
+}
+
+// A varint longer than ten bytes is not a 64-bit varint, and continuing would
+// silently wrap.
+func TestAnOverlongVarintIsRefused(t *testing.T) {
+	raw := []byte{0x08}
+	for range 12 {
+		raw = append(raw, 0xff)
+	}
+	raw = append(raw, 0x01)
+
+	if _, err := DecodeSparkplug(raw); err == nil {
+		t.Error("a varint past 64 bits was accepted")
+	}
+}
+
+func TestAFieldNumberOfZeroIsRefused(t *testing.T) {
+	if _, err := DecodeSparkplug([]byte{0x00}); err == nil {
+		t.Error("field number zero was accepted")
+	}
+}
+
+// Every skip path, since an unknown field of any wire type is legal.
+func TestUnknownFieldsOfEveryWireTypeAreSkipped(t *testing.T) {
+	p := &pb{}
+	p.varint(50, 1234)
+	p.fixed64(51, 5678)
+	p.fixed32(52, 90)
+	p.str(53, "vendor data")
+	p.bytes(fPayloadMetrics, metric("kept", dtInt32, func(m *pb) { m.varint(fMetricInt, 9) }))
+
+	got, err := DecodeSparkplug(p.out)
+	if err != nil {
+		t.Fatalf("unknown fields made the payload unreadable: %v", err)
+	}
+	if len(got.Metrics) != 1 || got.Metrics[0].Value != "9" {
+		t.Errorf("metrics = %+v, want the one that followed the unknown fields", got.Metrics)
+	}
+}

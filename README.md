@@ -53,8 +53,27 @@ the same broker as either a topic tree or a set of devices.
 - Message stream over a single WebSocket per tab, with per-client rate limiting
   and an honest "messages dropped" counter rather than a silently thinned feed
 - Last known value, retained flag, QoS, size and update count per topic
-- JSON payloads pretty-printed; binary payloads shown as hex instead of mojibake
-- Publish with QoS, retain and MQTT 5 properties
+- **Per-topic history**: a timeline to scrub through, a comparison against the
+  message before, and a chart of any number inside the payload — bounded by a
+  byte budget that evicts whole topics rather than leaving a history with an
+  invisible hole in it
+- **Payloads shown as what they are**: JSON pretty-printed, images rendered,
+  Sparkplug B decoded to named metrics, and anything else as hex rather than
+  mojibake. Export a topic's history as CSV or JSON
+- Publish with QoS, retain and MQTT 5 properties, a searchable history of what
+  has been sent, and a collection of messages worth sending more than once
+- **Broker statistics** from `$SYS` — clients, load averages, retained count,
+  uptime — reported as the broker's own numbers, and saying plainly when a
+  broker publishes none rather than showing a page of zeroes
+- **The namespace as a picture**, sized by traffic and coloured by recency
+- **Watch for a window**: ask what arrives over the next N seconds and get it
+  back, which is how an agent or a script inspects a broker without ever being
+  handed its password or certificate
+- Optional **recording to disk**, per connection, for the questions the
+  in-memory history is too small to answer
+- Clear a retained message, with the operator role and an audit entry
+- A log view and an action log, for the installation nobody can get a terminal
+  on
 
 **Access control**
 
@@ -78,7 +97,9 @@ the same broker as either a topic tree or a set of devices.
   routes, push events to the browser, publish back to the broker
 - Bundled: **Home Assistant MQTT discovery** and **Beckhoff PLC** — see below
 - An MCP server (`cmd/mqttview-mcp`) puts the PLC's live signals in front of an
-  AI agent, so PLC logic can be written against the button you just pressed
+  AI agent, so PLC logic can be written against the button you just pressed —
+  and `mqtt_collect` lets that agent watch any broker for a few seconds and
+  read back what arrived, with no broker credentials of its own
 - See [docs/PLUGINS.md](docs/PLUGINS.md) to write your own
 
 ## The Home Assistant plugin
