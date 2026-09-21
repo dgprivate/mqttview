@@ -11,11 +11,11 @@
 #   docker pull alpine:3.21 && docker image inspect alpine:3.21 \
 #     --format '{{index .RepoDigests 0}}'
 # Renovate keeps these moving; see .github/renovate.json.
-ARG NODE_IMAGE=node@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
-ARG GO_IMAGE=golang@sha256:cf6fca6641884b8433441b2b0652976f975e1d0fdd26d177eaaf8596087f3125
-ARG RUNTIME_IMAGE=alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+ARG NODE_IMAGE=node@sha256:b6f26b36c8ff49624cfdac716b8ea1138d606df02586a77d364bb5536a634f85
+ARG GO_IMAGE=golang@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414
+ARG RUNTIME_IMAGE=alpine@sha256:ce64758a109eb420d874a118f87920e625e12d3634e03b4a5573fd9f6e5d3507
 # syft, used to record what ends up in the image (see the "sbom" stage)
-ARG SYFT_IMAGE=anchore/syft@sha256:95fe0835e5bebc6f8b1f8acef68d47d63d594ef4c0f25c097ff853b23cbac74c
+ARG SYFT_IMAGE=anchore/syft@sha256:500e2d872ac019436926e8322b4fc1f39441d94d21f6f4046c6ff29b30e8cb02
 
 # 10001 rather than the 65532 "nonroot" convention: this image predates the
 # hardening and the /data volume on existing installs is owned by 10001.
