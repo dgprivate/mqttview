@@ -35,7 +35,7 @@
       "groupName": "frontend tooling"
     },
     {
-      "description": "The Go toolchain in go.mod is a floor, not a pin: raising it drops users of older toolchains",
+      "description": "The Go toolchain in go.mod is a floor, not a pin: raising it drops users of older toolchains, so it moves by decision rather than by bot",
       "matchManagers": ["gomod"],
       "matchDepTypes": ["golang"],
       "enabled": false
