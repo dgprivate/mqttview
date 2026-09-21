@@ -10,6 +10,14 @@ const DefaultHistorySize = 2000
 // is still available from the topic tree's last-known value.
 const maxHistoryPayload = 64 * 1024
 
+// MaxHistorySize caps what a connection spec may ask to keep. The ring is
+// allocated whole when the connection starts, so the number in the spec is an
+// allocation rather than a limit that fills up: a spec asking for a hundred
+// million entries is gigabytes before a single message arrives, and the field
+// comes straight from a request body. Fifty times the default is past any use
+// anybody has for it and turns a mistyped zero into a clamp, not an outage.
+const MaxHistorySize = 100_000
+
 // History is a fixed-size ring of the most recent messages on a connection.
 // It is the backing store for the live message stream in the UI.
 type History struct {
@@ -23,6 +31,9 @@ type History struct {
 func NewHistory(size int) *History {
 	if size <= 0 {
 		size = DefaultHistorySize
+	}
+	if size > MaxHistorySize {
+		size = MaxHistorySize
 	}
 	return &History{buf: make([]Message, size)}
 }
