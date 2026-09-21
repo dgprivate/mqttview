@@ -18,9 +18,9 @@ args:
   #
   # A digest rather than a tag, for the same reason the main Dockerfile pins
   # its base images that way: a tag is a name and a digest is the thing. This
-  # is 0.4.0; the multi-arch index, so it resolves on every architecture
+  # is 0.4.1; the multi-arch index, so it resolves on every architecture
   # the image is published for.
   #
   # Bump it with the app version. CI checks the digest is published and that
   # the Dockerfile default matches, so the two cannot drift.
-  MQTTVIEW_IMAGE: hausbit/mqttview@sha256:f5864ded0e97c162a1f8cec16b4d74cbbefbdf2e9fb67e873190144c1033d069
+  MQTTVIEW_IMAGE: hausbit/mqttview@sha256:e42866db79e8057876f101bfee8ff307989704a0ac357350c9ed53ed10d2693a
