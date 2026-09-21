@@ -11,6 +11,12 @@ import (
 const (
 	// DefaultTopicLogEntries is how many messages are kept per topic.
 	DefaultTopicLogEntries = 100
+	// MaxTopicLogEntries caps what a spec may ask to keep per topic, for the
+	// same reason MaxHistorySize exists and more sharply: this ring is
+	// allocated once per topic seen, so the cost is this number multiplied by
+	// however many topics the broker carries. The byte budget below bounds
+	// payloads held, not the rings themselves.
+	MaxTopicLogEntries = 10_000
 	// DefaultTopicLogBudget is the total payload budget across every topic.
 	// Reaching it evicts whole topics, least-recently-updated first.
 	DefaultTopicLogBudget = 32 << 20
@@ -57,6 +63,9 @@ type topicRing struct {
 func NewTopicLog(entries int, budget int64) *TopicLog {
 	if entries <= 0 {
 		entries = DefaultTopicLogEntries
+	}
+	if entries > MaxTopicLogEntries {
+		entries = MaxTopicLogEntries
 	}
 	if budget <= 0 {
 		budget = DefaultTopicLogBudget

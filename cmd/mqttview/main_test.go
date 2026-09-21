@@ -645,3 +645,52 @@ func TestHalfOfAClientCertificateIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// Static analysis reports every log call that puts a topic, a name or an
+// address into a record as a log-injection risk, and it is right about the
+// general shape: those values come from a broker or a browser and can contain
+// anything. What makes them harmless here is the handler. slog's TextHandler
+// quotes a value that needs quoting, so a newline arrives escaped and cannot
+// start a second record.
+//
+// That is a property of the handler this binary builds, not of the call sites,
+// so swapping newLogger's handler for one that does not quote would make a
+// few dozen of those reports true at once. This test is what would notice.
+func TestALoggedValueCannotForgeASecondLine(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	saved := os.Stdout
+	os.Stdout = w
+	// newLogger binds the handler to os.Stdout as it is now, so the swap has
+	// to happen before the logger exists.
+	log, _ := newLogger("info")
+	os.Stdout = saved
+
+	forged := "a/b\ntime=2026-01-01T00:00:00Z level=ERROR msg=\"deleted everything\" user=admin"
+	log.Info("message received", "topic", forged)
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	got := strings.Count(strings.TrimRight(string(out), "\n"), "\n")
+	if got != 0 {
+		t.Fatalf("one log call produced %d extra lines; the forged record got through:\n%s", got, out)
+	}
+	if !strings.Contains(string(out), `\n`) {
+		t.Errorf("the newline was not escaped, so the handler is not quoting:\n%s", out)
+	}
+	// The forged text is allowed to appear — inside the quoted value, which is
+	// exactly where it is harmless. What must not happen is a record of its
+	// own, so the assertion is on the record this call actually produced.
+	line := strings.TrimRight(string(out), "\n")
+	if _, rest, ok := strings.Cut(line, " "); !ok || !strings.HasPrefix(rest, `level=INFO msg="message received" topic="`) {
+		t.Errorf("the record was not the one that was logged:\n%s", out)
+	}
+}
