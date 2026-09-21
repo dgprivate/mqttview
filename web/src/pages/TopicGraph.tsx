@@ -59,7 +59,7 @@ export function TopicGraph() {
           </p>
         </div>
         <div className="button-row">
-          <Link className="button small" to={`/connections/${id}`}>
+          <Link className="btn small" to={`/connections/${id}`}>
             Explorer
           </Link>
         </div>
