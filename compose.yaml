@@ -95,6 +95,12 @@ services:
     image: eclipse-mosquitto:2
     container_name: mqttview-mosquitto-a
     restart: unless-stopped
+    # As the image's own mosquitto user rather than starting as root and
+    # dropping. 2.1 drops privileges itself on startup, which needs CAP_SETGID
+    # and CAP_CHOWN — capabilities this stack deliberately does not grant, so
+    # 2.1 exited 14 in a restart loop where 2.0 had been content. Starting as
+    # the right user means there is nothing to drop.
+    user: "1883:1883"
     volumes:
       - ./deploy/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mosquitto-a-data:/mosquitto/data
@@ -111,6 +117,12 @@ services:
     image: eclipse-mosquitto:2
     container_name: mqttview-mosquitto-b
     restart: unless-stopped
+    # As the image's own mosquitto user rather than starting as root and
+    # dropping. 2.1 drops privileges itself on startup, which needs CAP_SETGID
+    # and CAP_CHOWN — capabilities this stack deliberately does not grant, so
+    # 2.1 exited 14 in a restart loop where 2.0 had been content. Starting as
+    # the right user means there is nothing to drop.
+    user: "1883:1883"
     volumes:
       - ./deploy/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mosquitto-b-data:/mosquitto/data
