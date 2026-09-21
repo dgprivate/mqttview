@@ -89,10 +89,10 @@ In short:
   beside it:
 
 ```bash
-cosign verify-blob --bundle mqttview-v0.4.2.sbom.cdx.json.sigstore.json \
+cosign verify-blob --bundle mqttview-v0.4.3.sbom.cdx.json.sigstore.json \
   --certificate-identity-regexp '^https://github.com/.+/.github/workflows/publish-image.yml@.+' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  mqttview-v0.4.2.sbom.cdx.json
+  mqttview-v0.4.3.sbom.cdx.json
 ```
 
 Verify a published image the same way:
