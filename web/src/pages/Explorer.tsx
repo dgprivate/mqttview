@@ -117,13 +117,13 @@ export function Explorer() {
             </select>
           )}
           <StatusBadge status={status} />
-          <Link className="button small" to={`/connections/${id}/status`}>
+          <Link className="btn small" to={`/connections/${id}/status`}>
             Broker
           </Link>
-          <Link className="button small" to={`/connections/${id}/graph`}>
+          <Link className="btn small" to={`/connections/${id}/graph`}>
             Namespace
           </Link>
-          <Link className="button small" to={`/connections/${id}/recordings`}>
+          <Link className="btn small" to={`/connections/${id}/recordings`}>
             Recordings
           </Link>
           {can('operator') && (

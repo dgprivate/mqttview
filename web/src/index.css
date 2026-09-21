@@ -298,20 +298,23 @@ button:disabled {
   cursor: not-allowed;
 }
 
-button.primary {
+button.primary,
+.btn.primary {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-text);
   font-weight: 600;
 }
 
-button.danger {
+button.danger,
+.btn.danger {
   color: var(--err);
   border-color: var(--err);
   background: transparent;
 }
 
-button.small {
+button.small,
+.btn.small {
   min-height: 34px;
   padding: 0.25rem 0.6rem;
   font-size: 0.85rem;
@@ -1325,12 +1328,13 @@ button.link {
 }
 
 button.danger,
-.button.danger {
+.btn.danger {
   border-color: var(--warn);
   color: var(--warn);
 }
 
-button.danger:active {
+button.danger:active,
+.btn.danger:active {
   background: var(--warn-bg);
 }
 

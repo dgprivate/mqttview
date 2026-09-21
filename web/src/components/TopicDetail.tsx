@@ -150,10 +150,10 @@ function TopicActions({
 
   return (
     <div className="button-row">
-      <a className="button small" href={api.topicExportURL(connectionId, topic, 'csv')} download>
+      <a className="btn small" href={api.topicExportURL(connectionId, topic, 'csv')} download>
         Export CSV
       </a>
-      <a className="button small" href={api.topicExportURL(connectionId, topic, 'json')} download>
+      <a className="btn small" href={api.topicExportURL(connectionId, topic, 'json')} download>
         JSON
       </a>
       {canOperate && (
