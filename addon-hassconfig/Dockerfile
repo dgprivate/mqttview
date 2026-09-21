@@ -5,7 +5,7 @@
 # binary with the same provenance. Only the entrypoint differs: the add-on has
 # to read /data/options.json, which is how Home Assistant passes configuration.
 ARG BUILD_FROM
-ARG MQTTVIEW_IMAGE=hausbit/mqttview@sha256:3683fb838e3dc70c7a9361b67366cb9f7ff2b60145fefa4f1deb5e59024a7262
+ARG MQTTVIEW_IMAGE=hausbit/mqttview@sha256:b215a91808c42860f559385ede7e58d42bf625eacc095dc269c802d658e4e59a
 
 FROM ${MQTTVIEW_IMAGE} AS mqttview
 
