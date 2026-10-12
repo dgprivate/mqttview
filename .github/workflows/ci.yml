@@ -92,19 +92,21 @@ jobs:
       # later. Raise it when the number rises; never lower it to make a build
       # pass.
       #
-      # 90, restored from 88.5. The gap it allowed for — a runner covering less
-      # than a developer machine, because a ticker fires fewer times or
-      # runtime.NumCPU takes another branch — turned out to be mostly tests
-      # that passed without exercising what they claimed. Fixing those closed
-      # it: this runner now measures 90.3 on the same commit a laptop measures
-      # 90.1, and four real defects came out of the exercise.
+      # 91. It was 90, against a measured 90.3 — but Go 1.27.0 and 1.27.1
+      # counted some blocks' statements several times over (golang/go#81832),
+      # and the honest figure under 1.27.2 was 87.8. The floor stayed and the
+      # tests were written instead: 92.0 on a laptop with 1.27.2, and two real
+      # defects came out of it (SAML sign-in had never worked, and a changed
+      # key stopped the server from starting). A point of margin is left for a
+      # runner where a ticker fires fewer times or runtime.NumCPU takes
+      # another branch.
       - name: Coverage
         run: |
           go test -coverpkg=./internal/...,./cmd/... -coverprofile=coverage.out ./cmd/... ./internal/...
           go tool cover -func=coverage.out | tail -1
 
           total=$(go tool cover -func=coverage.out | tail -1 | grep -oE '[0-9]+\.[0-9]+')
-          floor=90
+          floor=91
           echo "total ${total}%, floor ${floor}%"
           awk -v t="$total" -v f="$floor" 'BEGIN { if (t+0 < f+0) { print "coverage fell below the floor"; exit 1 } }'
 

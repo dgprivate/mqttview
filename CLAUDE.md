@@ -50,13 +50,19 @@ nothing, because it costs somebody else the time to discover otherwise.
 
 **Every change ships with tests.** Not "where it makes sense" — every change. A
 bug fix ships with the test that fails without it. CI enforces a coverage floor
-of 90%; raise it as the number rises, and never lower it to make a build pass.
+of 91%; raise it as the number rises, and never lower it to make a build pass.
 
 It used to be 88.5, to allow for a runner covering less than a developer
 machine. Most of that gap turned out to be tests that passed without exercising
 what they claimed — a long poll whose goroutine fired after the assertion —
 which are bugs in the tests, not in the runner. Fixing them closed it and
 turned up four real defects on the way.
+
+The number is the toolchain's, not only ours. Go 1.27.0 and 1.27.1 counted
+some statements several times over (golang/go#81832); 1.27.2 fixed it and the
+same tests measured 87.8 instead of 90.3. When a Go upgrade moves coverage,
+compare the statement counts in the two profiles before deciding the tests
+changed — and if the honest number is under the floor, write the tests.
 
 Reaching a number is not the point, and a test written only to touch a line is
 worse than no test: it locks in whatever the code does today. Several of the
