@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -749,6 +751,62 @@ func TestAConnectionWrittenBeforeTheKeyWasEncryptedStillLoads(t *testing.T) {
 	}
 	if got.Spec.TLS.ServerName != "broker.example.com" || !got.Spec.TLS.InsecureSkipVerify {
 		t.Errorf("tls = %+v", got.Spec.TLS)
+	}
+}
+
+// A replaced or lost key used to stop the server from starting: the TLS block
+// that no longer opened was parsed as JSON, failed, and took every connection
+// and the boot with it, with an error about an invalid character rather than
+// the key. It must behave like the password beside it — the connection loads,
+// with the secrets empty for the user to re-enter.
+func TestAChangedKeyLeavesConnectionsLoadableWithTheirSecretsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.db")
+	openWithNewKey := func() *Store {
+		key, err := secrets.LoadOrCreateKey("", t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		box, err := secrets.New(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st, err := Open(path, box)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+
+	st := openWithNewKey()
+	spec := mqttc.ConnectionSpec{
+		ID: "c1", Name: "secured", URL: "mqtts://broker:8883", Version: mqttc.V311,
+		Password: "hunter2",
+		TLS:      mqttc.TLSSpec{ServerName: "broker.example.com", InsecureSkipVerify: true},
+	}
+	if err := st.SaveConnection(ConnectionRecord{Spec: spec}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st = openWithNewKey()
+	t.Cleanup(func() { _ = st.Close() })
+
+	all, err := st.ListConnections()
+	if err != nil {
+		t.Fatalf("one connection sealed with the old key made the list unreadable: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("got %d connections, want 1", len(all))
+	}
+	got := all[0].Spec
+	if got.Name != "secured" || !strings.HasSuffix(got.URL, "://broker:8883") {
+		t.Errorf("the connection's own settings were lost: %+v", got)
+	}
+	if got.Password != "" || !reflect.DeepEqual(got.TLS, mqttc.TLSSpec{}) {
+		t.Errorf("secrets sealed with another key came back as something: password %q, tls %+v", got.Password, got.TLS)
 	}
 }
 
