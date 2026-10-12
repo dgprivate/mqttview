@@ -2,9 +2,13 @@ package api_test
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/dgprivate/mqttview/internal/testutil"
 )
 
 // A connection whose broker does not answer is the ordinary case in this
@@ -203,4 +207,79 @@ func TestClearingStateOnAQuietConnection(t *testing.T) {
 	if len(msgs) != 0 {
 		t.Errorf("history still holds %d messages after clearing", len(msgs))
 	}
+}
+
+// The list is what the connections page renders. It must say whether a
+// password is set and never what it is.
+func TestTheConnectionListNeverCarriesAPassword(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+	ts.decode(ts.do(http.MethodPost, "/api/connections", map[string]any{
+		"name": "secret", "url": "mqtt://127.0.0.1:1", "version": "3.1.1",
+		"username": "u", "password": "do-not-echo-this",
+	}), http.StatusCreated, nil)
+
+	resp := ts.do(http.MethodGet, "/api/connections", nil)
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if strings.Contains(string(raw), "do-not-echo-this") {
+		t.Fatal("the connection list contains the broker password")
+	}
+	var list []struct {
+		Name        string `json:"name"`
+		HasPassword bool   `json:"hasPassword"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || !list[0].HasPassword {
+		t.Errorf("list is %+v, want one connection reporting a password", list)
+	}
+}
+
+// A search with a wildcard in it is an MQTT filter, which is what somebody
+// typing home/+/temp means; matching it as a substring would find nothing.
+func TestASearchWithAWildcardMatchesLikeAFilter(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+	connID := subscribedBroker(t, ts)
+
+	publishAndWait(t, ts, connID, "home/kitchen/temp", "21", 1)
+	publishAndWait(t, ts, connID, "home/kitchen/humidity", "40", 1)
+
+	resp := ts.do(http.MethodGet, "/api/connections/"+connID+"/search?q=home/%2B/temp", nil)
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d: %s", resp.StatusCode, raw)
+	}
+	if !strings.Contains(string(raw), "home/kitchen/temp") || strings.Contains(string(raw), "humidity") {
+		t.Errorf("search for home/+/temp returned %s", raw)
+	}
+}
+
+// AutoConnect dials in the background so the create answers at once; the
+// connection still has to end up connected.
+func TestAnAutoConnectingConnectionConnects(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+	broker := ts.startBroker(t)
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	ts.decode(ts.do(http.MethodPost, "/api/connections", map[string]any{
+		"name": "auto", "url": broker.URL, "version": "3.1.1", "autoConnect": true,
+	}), http.StatusCreated, &created)
+
+	testutil.WaitFor(t, 10*time.Second, "the connection to come up on its own", func() bool {
+		var view struct {
+			Status struct {
+				State string `json:"state"`
+			} `json:"status"`
+		}
+		ts.decode(ts.do(http.MethodGet, "/api/connections/"+created.ID, nil), http.StatusOK, &view)
+		return view.Status.State == "connected"
+	})
 }

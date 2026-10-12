@@ -228,3 +228,27 @@ func TestTheLogViewIsAdminOnly(t *testing.T) {
 		t.Errorf("an operator read the log view: status = %d, want 403", got)
 	}
 }
+
+// Clearing a retained value is a publish, so a broker that is not there fails
+// it the way it fails any publish: 502, and nothing recorded as done.
+func TestClearingARetainedValueOnABrokerThatIsNotThereIsNotAudited(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+	connID := deadConnection(t, ts)
+
+	if got := ts.status(http.MethodPost, "/api/connections/"+connID+"/retained/clear",
+		map[string]any{"topic": "a/b"}); got != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", got)
+	}
+	if got := rawDo(t, ts, http.MethodPost, "/api/connections/"+connID+"/retained/clear", `{not json`); got != http.StatusBadRequest {
+		t.Errorf("a malformed body gave %d, want 400", got)
+	}
+
+	var entries []struct {
+		Action string `json:"action"`
+	}
+	ts.decode(ts.do(http.MethodGet, "/api/audit", nil), http.StatusOK, &entries)
+	if len(entries) != 0 {
+		t.Errorf("the audit log records %+v for a clear that never happened", entries)
+	}
+}

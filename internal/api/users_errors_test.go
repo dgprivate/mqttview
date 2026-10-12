@@ -224,3 +224,51 @@ func TestListingUsersShowsEveryone(t *testing.T) {
 		}
 	}
 }
+
+// The least privilege is the default. An administrator who forgets to pick a
+// role has made somebody who can look, not somebody who can act.
+func TestAUserCreatedWithoutARoleIsAViewer(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+
+	var created struct {
+		Role string `json:"role"`
+	}
+	ts.decode(ts.do(http.MethodPost, "/api/users", map[string]any{
+		"email": "norole@example.com", "password": "correct-horse-battery",
+	}), http.StatusCreated, &created)
+	if created.Role != "viewer" {
+		t.Errorf("role = %q, want viewer", created.Role)
+	}
+}
+
+// With a second administrator in place the last-admin rule no longer stands in
+// the way, and it is this rule alone that stops an administrator disabling the
+// account they are using.
+func TestAnAdministratorCannotDisableTheirOwnAccount(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+	newUser(t, ts, "second-admin@example.com", "admin")
+	me := mustUserID(t, ts, adminEmail)
+
+	if got := ts.status(http.MethodPut, "/api/users/"+me, map[string]any{
+		"email": adminEmail, "role": "admin", "disabled": true,
+	}); got != http.StatusConflict {
+		t.Errorf("status = %d, want 409", got)
+	}
+	if got := ts.status(http.MethodGet, "/api/auth/me", nil); got != http.StatusOK {
+		t.Errorf("the session answers %d after the refused change, want it intact", got)
+	}
+}
+
+func TestUserWritesRejectAMalformedBody(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+	id := newUser(t, ts, "body@example.com", "viewer")
+
+	for _, path := range []string{"/api/users/" + id, "/api/users/" + id + "/password"} {
+		if got := rawDo(t, ts, http.MethodPut, path, `{not json`); got != http.StatusBadRequest {
+			t.Errorf("PUT %s with a malformed body gave %d, want 400", path, got)
+		}
+	}
+}

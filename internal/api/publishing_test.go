@@ -307,3 +307,89 @@ func TestAViewerCanReadTheHistoryButNotSendOrSave(t *testing.T) {
 		}
 	}
 }
+
+// A saved message is checked on the way in exactly as a publish is, on create
+// and on edit alike. Otherwise the collection becomes a way to store a message
+// that can never be sent, and the failure surfaces only when somebody presses
+// the button.
+func TestASavedMessageIsValidatedOnEveryWrite(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+	connID := deadConnection(t, ts)
+	base := "/api/connections/" + connID + "/saved"
+
+	var created savedEntry
+	ts.decode(ts.do(http.MethodPost, base, map[string]any{
+		"name": "original", "topic": "a/b", "payload": "x",
+	}), http.StatusCreated, &created)
+
+	bad := map[string]map[string]any{
+		"a payload that is not base64": {"name": "n", "topic": "a/b", "payload": "!!", "payloadBase64": true},
+		"a wildcard topic":             {"name": "n", "topic": "a/#", "payload": "x"},
+	}
+	for name, body := range bad {
+		if got := ts.status(http.MethodPost, base, body); got != http.StatusBadRequest {
+			t.Errorf("creating with %s gave %d, want 400", name, got)
+		}
+		if got := ts.status(http.MethodPut, base+"/"+created.ID, body); got != http.StatusBadRequest {
+			t.Errorf("editing to %s gave %d, want 400", name, got)
+		}
+	}
+	if got := rawDo(t, ts, http.MethodPut, base+"/"+created.ID, `{not json`); got != http.StatusBadRequest {
+		t.Errorf("editing with a malformed body gave %d, want 400", got)
+	}
+
+	var list []savedEntry
+	ts.decode(ts.do(http.MethodGet, base, nil), http.StatusOK, &list)
+	if len(list) != 1 || list[0].Name != "original" || list[0].Topic != "a/b" {
+		t.Errorf("the collection is %+v after refused writes, want only the original untouched", list)
+	}
+}
+
+func TestASavedMessageThatIsNotThereIsNotFound(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+	connID := deadConnection(t, ts)
+	base := "/api/connections/" + connID + "/saved/no-such-message"
+
+	for _, ep := range []struct {
+		method string
+		path   string
+		body   any
+	}{
+		{http.MethodPut, base, map[string]any{"name": "n", "topic": "a/b", "payload": "x"}},
+		{http.MethodDelete, base, nil},
+		{http.MethodPost, base + "/publish", nil},
+	} {
+		if got := ts.status(ep.method, ep.path, ep.body); got != http.StatusNotFound {
+			t.Errorf("%s %s gave %d, want 404", ep.method, ep.path, got)
+		}
+	}
+}
+
+// A binary payload is kept as bytes and comes back as base64, so the editor
+// shows what will be sent rather than mojibake that would be re-encoded on
+// save.
+func TestABinarySavedMessageRoundTripsAsBase64(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+	connID := deadConnection(t, ts)
+
+	var created savedEntry
+	ts.decode(ts.do(http.MethodPost, "/api/connections/"+connID+"/saved", map[string]any{
+		"name": "bytes", "topic": "a/b", "payload": "//79", "payloadBase64": true,
+	}), http.StatusCreated, &created)
+	if !created.Base64 || created.Payload != "//79" {
+		t.Errorf("came back as %q (base64 %v), want the same base64", created.Payload, created.Base64)
+	}
+}
+
+func TestARepublishNeedsANumericID(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+	connID := deadConnection(t, ts)
+
+	if got := ts.status(http.MethodPost, "/api/connections/"+connID+"/publishes/latest/republish", nil); got != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", got)
+	}
+}
