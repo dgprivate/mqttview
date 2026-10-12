@@ -498,3 +498,127 @@ func TestUnknownFieldsOfEveryWireTypeAreSkipped(t *testing.T) {
 		t.Errorf("metrics = %+v, want the one that followed the unknown fields", got.Metrics)
 	}
 }
+
+// A field whose tag arrived but whose value did not is a truncated message,
+// and it has to be refused. Reading it as zero would report something the
+// device never sent: an Int32 of 0, a seq of 0, an empty name. This goes
+// through every field the decoder knows, at both levels, because each one
+// reads its value separately and each can be the one that is cut short.
+func TestEveryKnownFieldCutOffAfterItsTagIsRefused(t *testing.T) {
+	type field struct {
+		name  string
+		field int
+		wire  int
+	}
+
+	for _, c := range []field{
+		{"timestamp", fPayloadTimestamp, wireVarint},
+		{"metrics", fPayloadMetrics, wireBytes},
+		{"seq", fPayloadSeq, wireVarint},
+		{"uuid", fPayloadUUID, wireBytes},
+		{"body", fPayloadBody, wireBytes},
+	} {
+		t.Run("payload "+c.name, func(t *testing.T) {
+			p := &pb{}
+			p.tag(c.field, c.wire)
+			if got, err := DecodeSparkplug(p.out); err == nil {
+				t.Errorf("a %s with no value was accepted as %+v", c.name, got)
+			}
+		})
+	}
+
+	for _, c := range []field{
+		{"name", fMetricName, wireBytes},
+		{"alias", fMetricAlias, wireVarint},
+		{"timestamp", fMetricTimestamp, wireVarint},
+		{"datatype", fMetricDatatype, wireVarint},
+		{"is_historical", fMetricIsHistorical, wireVarint},
+		{"is_transient", fMetricIsTransient, wireVarint},
+		{"is_null", fMetricIsNull, wireVarint},
+		{"int_value", fMetricInt, wireVarint},
+		{"long_value", fMetricLong, wireVarint},
+		{"float_value", fMetricFloat, wireI32},
+		{"double_value", fMetricDouble, wireI64},
+		{"boolean_value", fMetricBool, wireVarint},
+		{"string_value", fMetricString, wireBytes},
+		{"bytes_value", fMetricBytes, wireBytes},
+		{"dataset_value", fMetricDataSet, wireBytes},
+		{"template_value", fMetricTemplate, wireBytes},
+	} {
+		t.Run("metric "+c.name, func(t *testing.T) {
+			// The metric's own length is right, so the envelope cannot tell
+			// anything is wrong; only the metric decoder can notice.
+			m := &pb{}
+			m.tag(c.field, c.wire)
+			if got, err := DecodeSparkplug(payloadOf(m.out)); err == nil {
+				t.Errorf("a metric whose %s had no value was accepted as %+v", c.name, got.Metrics)
+			}
+		})
+	}
+}
+
+// A metric that cannot be read spoils the payload rather than vanishing from
+// it: a list that silently comes back one short reads as the device having
+// stopped reporting that metric.
+func TestABrokenMetricIsNotDroppedSilently(t *testing.T) {
+	broken := &pb{}
+	broken.tag(fMetricInt, wireVarint)
+	good := metric("ok", dtInt32, func(p *pb) { p.varint(fMetricInt, 1) })
+
+	if got, err := DecodeSparkplug(payloadOf(good, broken.out)); err == nil {
+		t.Errorf("decoded %d metrics and no error from a payload with a broken one", len(got.Metrics))
+	}
+}
+
+// The envelope's checks on tags and wire types hold inside a metric as well:
+// a metric is decoded by its own loop, and a malformed tag there is as much a
+// broken message as one in the envelope.
+func TestAMalformedTagInsideAMetricIsRefused(t *testing.T) {
+	zero := &pb{}
+	zero.raw(0) // field number zero
+	group := &pb{}
+	group.tag(60, 3) // an unknown field in the deprecated group encoding
+
+	for name, m := range map[string][]byte{"field zero": zero.out, "group wire type": group.out} {
+		if got, err := DecodeSparkplug(payloadOf(m)); err == nil {
+			t.Errorf("%s inside a metric was accepted as %+v", name, got.Metrics)
+		}
+	}
+}
+
+// When the datatype is one this build does not know, the value is still shown
+// — read as whichever arm of the oneof carried it, the one thing certainly
+// true about it — and the note says why it was not interpreted.
+func TestAnUnknownDatatypeShowsWhateverArmArrived(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		value    func(*pb)
+		want     string
+		wantNote string // expected in the note besides the datatype
+	}{
+		{"long", func(p *pb) { p.varint(fMetricLong, 1<<40) }, "1099511627776", ""},
+		{"float", func(p *pb) { p.fixed32(fMetricFloat, math.Float32bits(1.5)) }, "1.5", ""},
+		{"double", func(p *pb) { p.fixed64(fMetricDouble, math.Float64bits(-2.25)) }, "-2.25", ""},
+		{"bool", func(p *pb) { p.varint(fMetricBool, 1) }, "true", ""},
+		{"string", func(p *pb) { p.str(fMetricString, "hello") }, "hello", ""},
+		{"bytes", func(p *pb) { p.bytes(fMetricBytes, []byte{0xff}) }, "", "1 byte,"},
+		{"dataset", func(p *pb) { p.bytes(fMetricDataSet, []byte{1, 2}) }, "", ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			m := decodeOne(t, payloadOf(metric("m", 99, c.value)))
+
+			if m.Value != c.want {
+				t.Errorf("value = %q, want %q", m.Value, c.want)
+			}
+			if !strings.Contains(m.Note, "datatype 99") {
+				t.Errorf("note = %q, want it to name the datatype it did not know", m.Note)
+			}
+			if !strings.Contains(m.Note, c.wantNote) {
+				t.Errorf("note = %q, want it to mention %q", m.Note, c.wantNote)
+			}
+			if m.DataType != "datatype 99" {
+				t.Errorf("datatype = %q, want the raw index rather than a guessed name", m.DataType)
+			}
+		})
+	}
+}
