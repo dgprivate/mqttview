@@ -621,6 +621,27 @@ func TestEveryQueryReportsAFailingDatabase(t *testing.T) {
 		"RecoveryCodeHashes":       func() error { _, err := st.RecoveryCodeHashes(u.ID); return err },
 		"UseRecoveryCode":          func() error { return st.UseRecoveryCode("id", time.Now()) },
 		"CountUnusedRecoveryCodes": func() error { _, err := st.CountUnusedRecoveryCodes(u.ID); return err },
+
+		"RecordPublish": func() error {
+			return st.RecordPublish(PublishRecord{ConnectionID: "c", Topic: "t", Payload: []byte("p")}, 0)
+		},
+		"PublishHistory":      func() error { _, err := st.PublishHistory("c", "", 0); return err },
+		"GetPublish":          func() error { _, err := st.GetPublish("c", 1); return err },
+		"ClearPublishHistory": func() error { return st.ClearPublishHistory("c") },
+		"SaveMessage": func() error {
+			return st.SaveMessage(SavedMessage{ID: "m", Name: "n", Topic: "t", Payload: []byte("p")})
+		},
+		"SavedMessages":      func() error { _, err := st.SavedMessages("c"); return err },
+		"GetSavedMessage":    func() error { _, err := st.GetSavedMessage("m"); return err },
+		"DeleteSavedMessage": func() error { return st.DeleteSavedMessage("m") },
+
+		"AppendRecorded": func() error {
+			return st.AppendRecorded([]RecordedMessage{{ConnectionID: "c", Topic: "t", Payload: []byte("p")}})
+		},
+		"PruneRecorded":  func() error { _, err := st.PruneRecorded("c", 0); return err },
+		"Recorded":       func() error { _, err := st.Recorded(RecordedQuery{ConnectionID: "c"}); return err },
+		"RecordingStats": func() error { _, err := st.RecordingStats("c"); return err },
+		"DeleteRecorded": func() error { return st.DeleteRecorded("c") },
 	}
 
 	for name, fn := range checks {
