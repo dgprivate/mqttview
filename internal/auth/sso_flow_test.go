@@ -34,6 +34,14 @@ type fakeIDP struct {
 	// nonce is captured from the authorisation request and echoed into the
 	// token, which is what the verifier insists on.
 	nonce string
+
+	// signWith, when set, signs the ID token with a key the JWKS does not
+	// publish, under the published key ID: a forgery.
+	signWith *rsa.PrivateKey
+	// tokenStatus, when set, makes the token endpoint fail with it.
+	tokenStatus int
+	// omitIDToken answers the exchange with an access token only.
+	omitIDToken bool
 }
 
 func newFakeIDP(t *testing.T) *fakeIDP {
@@ -61,9 +69,17 @@ func newFakeIDP(t *testing.T) *fakeIDP {
 		}}})
 	})
 	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, map[string]any{
-			"access_token": "at", "token_type": "Bearer", "id_token": idp.idToken(t),
-		})
+		if idp.tokenStatus != 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(idp.tokenStatus)
+			_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
+			return
+		}
+		resp := map[string]any{"access_token": "at", "token_type": "Bearer"}
+		if !idp.omitIDToken {
+			resp["id_token"] = idp.idToken(t)
+		}
+		writeJSON(w, resp)
 	})
 
 	idp.srv = httptest.NewServer(mux)
@@ -86,8 +102,12 @@ func (i *fakeIDP) idToken(t *testing.T) string {
 		claims[k] = v
 	}
 
+	key := i.key
+	if i.signWith != nil {
+		key = i.signWith
+	}
 	signer, err := jose.NewSigner(
-		jose.SigningKey{Algorithm: jose.RS256, Key: i.key},
+		jose.SigningKey{Algorithm: jose.RS256, Key: key},
 		(&jose.SignerOptions{}).WithType("JWT").WithHeader("kid", i.keyID))
 	if err != nil {
 		t.Fatal(err)

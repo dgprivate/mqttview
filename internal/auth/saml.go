@@ -377,6 +377,13 @@ func (s *Service) CompleteSAML(w http.ResponseWriter, r *http.Request, id string
 		return store.User{}, "", err
 	}
 
+	// ParseResponse reads the assertion from r.PostForm and does not parse the
+	// body itself; unparsed, PostForm is empty and every genuine assertion is
+	// refused as unreadable.
+	if err := r.ParseForm(); err != nil {
+		return store.User{}, "", errors.New("auth: the identity provider's response could not be read")
+	}
+
 	// ParseResponse is what verifies the signature, the audience, the
 	// conditions and the timestamps. Passing exactly one expected request ID
 	// is what stops an assertion minted for a different login being replayed

@@ -48,7 +48,7 @@ view will both misbehave.
 
 `secret_key` encrypts broker passwords and TLS private keys at rest. If it is
 empty, mqttview generates `data_dir/secret.key` (mode 0600) on first run.
-**Losing it means every stored broker password must be re-entered**; changing it
+**Losing it means every stored broker password and TLS setting must be re-entered**; changing it
 has the same effect. In Kubernetes, prefer `MQTTVIEW_SECRET_KEY` from a Secret.
 
 ## TLS for the UI

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/dgprivate/mqttview/internal/mqttc"
@@ -215,12 +216,22 @@ func nullIfEmpty(s string) any {
 // connection unreadable. It is re-sealed the next time the connection is
 // saved. The fallback is safe in the sense that matters — anyone who can put
 // plaintext in that column can already read the key that would decrypt it.
+//
+// Sealed text that no longer opens — the key was replaced or lost — is treated
+// like the password: the connection comes back with empty TLS settings for the
+// user to re-enter. Parsing the ciphertext as JSON instead failed every
+// connection, and with it the server's start, with a JSON syntax error that
+// said nothing about the key. Sealed text is base64 and never starts with '{',
+// so only a genuine pre-encryption row reaches the fallback.
 func decodeTLS(column string, s *Store, spec *mqttc.ConnectionSpec) error {
 	if column == "" {
 		return nil
 	}
 	if plain, err := s.box.Open(column); err == nil {
 		return json.Unmarshal([]byte(plain), &spec.TLS)
+	}
+	if !strings.HasPrefix(strings.TrimSpace(column), "{") {
+		return nil
 	}
 	return json.Unmarshal([]byte(column), &spec.TLS)
 }

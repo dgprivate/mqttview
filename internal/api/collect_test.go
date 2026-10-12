@@ -235,3 +235,60 @@ func TestCollectingNeedsASession(t *testing.T) {
 		t.Errorf("status = %d, want 401", got)
 	}
 }
+
+func TestACollectionWindowMustBeANumber(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+	connID, _ := connectedBroker(t, ts)
+
+	if got := ts.status(http.MethodGet, "/api/connections/"+connID+"/collect?seconds=ten", nil); got != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", got)
+	}
+}
+
+// A window over a filter the connection already subscribes to borrows that
+// subscription rather than adding its own. Ending the window must not take
+// the connection's subscription with it.
+func TestCollectingOnAFilterTheConnectionHoldsLeavesItSubscribed(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+	connID := subscribedBroker(t, ts)
+
+	collect(t, ts, connID, "seconds=1&filter=%23")
+
+	var view struct {
+		Subscriptions []struct {
+			Filter string `json:"filter"`
+		} `json:"subscriptions"`
+	}
+	ts.decode(ts.do(http.MethodGet, "/api/connections/"+connID, nil), http.StatusOK, &view)
+	if len(view.Subscriptions) != 1 || view.Subscriptions[0].Filter != "#" {
+		t.Errorf("subscriptions after the window are %+v, want # still there", view.Subscriptions)
+	}
+	// And the broker still delivers on it.
+	publishAndWait(t, ts, connID, "after/window", "still here", 1)
+}
+
+func TestACollectionReturnsOnlyWhatMatchesItsFilter(t *testing.T) {
+	ts := newTestServer(t)
+	ts.login()
+	connID := subscribedBroker(t, ts)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		time.Sleep(300 * time.Millisecond)
+		for _, topic := range []string{"other/x", "wanted/x"} {
+			ts.decode(ts.do(http.MethodPost, "/api/connections/"+connID+"/publish",
+				map[string]any{"topic": topic, "payload": "v"}), http.StatusOK, nil)
+		}
+	}()
+
+	got := collect(t, ts, connID, "seconds=2&filter=wanted/%23")
+	wg.Wait()
+
+	if len(got.Topics) != 1 || got.Topics["wanted/x"] != 1 {
+		t.Errorf("collected topics %v, want only wanted/x", got.Topics)
+	}
+}
