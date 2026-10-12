@@ -245,6 +245,11 @@ jobs:
           build-args: |
             VERSION=ci
             VCS_REF=${{ github.sha }}
+          # runtime-base is always rebuilt. Its cache key is the base digest and
+          # the text of the RUN line, neither of which changes when Alpine ships
+          # a fix, so a cached layer keeps the old package forever and
+          # apk upgrade never runs again. The stage takes seconds.
+          no-cache-filters: runtime-base
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
