@@ -8,7 +8,7 @@ require (
 	github.com/crewjam/saml v0.5.1
 	github.com/eclipse/paho.golang v0.23.1-0.20260824221508-ae76bd52efac
 	github.com/eclipse/paho.mqtt.golang v1.5.1
-	github.com/go-chi/chi/v5 v5.3.2
+	github.com/go-chi/chi/v5 v5.4.0
 	github.com/go-jose/go-jose/v4 v4.1.5
 	github.com/google/uuid v1.6.0
 	github.com/mochi-mqtt/server/v2 v2.7.9
